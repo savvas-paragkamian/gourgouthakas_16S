@@ -1,0 +1,27 @@
+# Raw sequencing data — large, immutable, delivered separately
+data/PB482_SP/
+data/PB482_SP.tar
+
+
+# Reference databases live outside the repo (/mnt/data/databases)
+
+# Nextflow
+work/
+.nextflow/
+.nextflow.log*
+results/
+
+# Generated outputs
+plots/
+data/processed/
+
+# renv: the lockfile is tracked, the library is not
+renv/library/
+renv/staging/
+renv/python/
+renv/sandbox/
+.renv-cache/
+
+.Rhistory
+.RData
+.Rproj.user/
