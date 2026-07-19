@@ -15,11 +15,7 @@ results/
 plots/
 data/processed/
 
-# renv: the lockfile is tracked, the library is not
-renv/library/
-renv/staging/
-renv/python/
-renv/sandbox/
+# renv: the lockfile is tracked; renv/ ships its own .gitignore for the library
 .renv-cache/
 
 .Rhistory
