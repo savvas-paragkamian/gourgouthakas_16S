@@ -11,11 +11,29 @@ host needs **only podman**.
 ## Setup
 
 ```bash
-podman build -t gourgouthakas-16s .        # ~30 min, mostly compiling R packages
+git clone --recurse-submodules https://github.com/savvas-paragkamian/gourgouthakas_16S.git
+cd gourgouthakas_16S
+
+podman build -t gourgouthakas-16s .        # ~45 min, mostly compiling R packages
 ./scripts/run_pipeline.sh download         # once: SILVA + GTDB + GG2 (11 GB)
 ```
 
+`HiFi-16S-workflow` is a submodule pinned to the exact upstream revision this
+analysis was run against — `--recurse-submodules` is required, or it clones as
+an empty directory. If you already cloned without it:
+
+```bash
+git submodule update --init
+```
+
 Databases go to `/mnt/data/databases` by default; override with `DB_DIR=...`.
+
+Raw reads are not in git (4.5 GB). Copy `data/PB482_SP/` across separately and
+verify it:
+
+```bash
+cd data && md5sum -c md5sum-16s.txt        # expect 51/51 OK
+```
 
 ## Run the pipeline
 

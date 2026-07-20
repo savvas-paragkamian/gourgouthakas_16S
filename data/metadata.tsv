@@ -1,0 +1,52 @@
+sample_name	site	replicate	barcode	sample_type	sample_set	control_type	depth_m	elevation_m	temperature_c	conductivity_ms	lat	lon	collection_date	description
+ctr_EB	ctr_EB		Kinnex16S_Fwd_12--Kinnex16S_Rev_25	control	control	extraction_blank								
+ctr_MM	ctr_MM		Kinnex16S_Fwd_12--Kinnex16S_Rev_26	control	control	mastermix_blank								
+ctr_msa_3001	ctr_msa_3001		Kinnex16S_Fwd_12--Kinnex16S_Rev_23	control	control	mock								
+ctr_zymo_com	ctr_zymo_com		Kinnex16S_Fwd_12--Kinnex16S_Rev_21	control	control	mock								
+ctr_zymo_log	ctr_zymo_log		Kinnex16S_Fwd_12--Kinnex16S_Rev_22	control	control	mock								
+C1_1_A	C1	1	Kinnex16S_Fwd_01--Kinnex16S_Rev_21	sediment	transect		0	1535	9.2		35.33213	24.08346	2022-08-09	Sediment sample from the cave entrance
+C1_2_A	C1	2	Kinnex16S_Fwd_01--Kinnex16S_Rev_22	sediment	transect		0	1535	9.2		35.33213	24.08346	2022-08-09	Sediment sample from the cave entrance
+C1I_1_A	C1_I	1	Kinnex16S_Fwd_04--Kinnex16S_Rev_25	sediment	isolate_source		0	1535	9.2		35.33213	24.08346	2022-08-09	Sediment sample from the cave entrance also used for isolates
+C1I_2_A	C1_I	2	Kinnex16S_Fwd_04--Kinnex16S_Rev_26	sediment	isolate_source		0	1535	9.2		35.33213	24.08346	2022-08-09	Sediment sample from the cave entrance also used for isolates
+C2_1_A	C2	1	Kinnex16S_Fwd_01--Kinnex16S_Rev_23	sediment	transect		39	1496	7.2		35.33213	24.08346	2022-08-09	Sediment sample from at -39 m depth from cave wall biofilm
+C2_2_A	C2	2	Kinnex16S_Fwd_01--Kinnex16S_Rev_24	sediment	transect		39	1496	7.2		35.33213	24.08346	2022-08-09	Sediment sample from at -39 m depth from cave wall biofilm
+C2I_1_A	C2_I	1	Kinnex16S_Fwd_04--Kinnex16S_Rev_27	sediment	isolate_source		39	1496	7.2		35.33213	24.08346	2022-08-09	Sediment sample from at -39 m depth from cave wall biofilm also used for isolates
+C2I_2_A	C2_I	2	Kinnex16S_Fwd_04--Kinnex16S_Rev_28	sediment	isolate_source		39	1496	7.2		35.33213	24.08346	2022-08-09	Sediment sample from at -39 m depth from cave wall biofilm also used for isolates
+C3_1_A	C3	1	Kinnex16S_Fwd_01--Kinnex16S_Rev_25	sediment	transect		220	1315	6.9		35.33213	24.08346	2022-08-09	Sediment sample from at -220 m depth from cave wall clay
+C3_2_A	C3	2	Kinnex16S_Fwd_01--Kinnex16S_Rev_26	sediment	transect		220	1315	6.9		35.33213	24.08346	2022-08-09	Sediment sample from at -220 m depth from cave wall clay
+C3I_1_A	C3_I	1	Kinnex16S_Fwd_05--Kinnex16S_Rev_21	sediment	isolate_source		220	1315	6.9		35.33213	24.08346	2022-08-09	Sediment sample from at -220 m depth from cave wall clay also used for isolates
+C3I_2_A	C3_I	2	Kinnex16S_Fwd_05--Kinnex16S_Rev_22	sediment	isolate_source		220	1315	6.9		35.33213	24.08346	2022-08-09	Sediment sample from at -220 m depth from cave wall clay also used for isolates
+C4_1_A	C4	1	Kinnex16S_Fwd_01--Kinnex16S_Rev_27	sediment	transect		418	1117	6.5		35.33213	24.08346	2022-08-09	Sediment sample from at -418 m depth from clay-filled fracture
+C4_2_A	C4	2	Kinnex16S_Fwd_01--Kinnex16S_Rev_28	sediment	transect		418	1117	6.5		35.33213	24.08346	2022-08-09	Sediment sample from at -418 m depth from clay-filled fracture
+C4I_1_A	C4_I	1	Kinnex16S_Fwd_05--Kinnex16S_Rev_23	sediment	isolate_source		418	1117	6.5		35.33213	24.08346	2022-08-09	Sediment sample from at -418 m depth from clay-filled fracture also used for isolates
+C4I_2_A	C4_I	2	Kinnex16S_Fwd_05--Kinnex16S_Rev_24	sediment	isolate_source		418	1117	6.5		35.33213	24.08346	2022-08-09	Sediment sample from at -418 m depth from clay-filled fracture also used for isolates
+C5_1_A	C5	1	Kinnex16S_Fwd_02--Kinnex16S_Rev_21	sediment	transect		678	857	7.4		35.33213	24.08346	2022-08-09	Sediment sample from at -678 m depth biofilm  from the first siphon
+C5_2_A	C5	2	Kinnex16S_Fwd_02--Kinnex16S_Rev_22	sediment	transect		678	857	7.4		35.33213	24.08346	2022-08-09	Sediment sample from at -678 m depth biofilm  from the first siphon
+C5I_1_A	C5_I	1	Kinnex16S_Fwd_05--Kinnex16S_Rev_25	sediment	isolate_source		678	857	7.4		35.33213	24.08346	2022-08-09	Sediment sample from at -678 m depth biofilm  from the first siphon also used for isolates
+C5I_2_A	C5_I	2	Kinnex16S_Fwd_05--Kinnex16S_Rev_26	sediment	isolate_source		678	857	7.4		35.33213	24.08346	2022-08-09	Sediment sample from at -678 m depth biofilm  from the first siphon also used for isolates
+C6_1_A	C6	1	Kinnex16S_Fwd_02--Kinnex16S_Rev_23	sediment	transect		713	822	7.4		35.33213	24.08346	2022-08-09	Sediment sample from at -713 m depth from Marcel waterfall
+C6_2_A	C6	2	Kinnex16S_Fwd_02--Kinnex16S_Rev_24	sediment	transect		713	822	7.4		35.33213	24.08346	2022-08-09	Sediment sample from at -713 m depth from Marcel waterfall
+C6I_1_A	C6_I	1	Kinnex16S_Fwd_05--Kinnex16S_Rev_27	sediment	isolate_source		713	822	7.4		35.33213	24.08346	2022-08-09	Sediment sample from at -713 m depth from Marcel waterfall also used for isolates
+C6I_2_A	C6_I	2	Kinnex16S_Fwd_05--Kinnex16S_Rev_28	sediment	isolate_source		713	822	7.4		35.33213	24.08346	2022-08-09	Sediment sample from at -713 m depth from Marcel waterfall also used for isolates
+C7_1_A	C7	1	Kinnex16S_Fwd_02--Kinnex16S_Rev_25	sediment	transect		900	635			35.33213	24.08346	2022-08-09	Sediment sample from at -900 m depth water curtain
+C7_2_A	C7	2	Kinnex16S_Fwd_02--Kinnex16S_Rev_26	sediment	transect		900	635			35.33213	24.08346	2022-08-09	Sediment sample from at -900 m depth water curtain
+C7I_1_A	C7_I	1	Kinnex16S_Fwd_06--Kinnex16S_Rev_21	sediment	isolate_source		900	635			35.33213	24.08346	2022-08-09	Sediment sample from at -900 m depth water curtain also used for isolates
+C7I_2_A	C7_I	2	Kinnex16S_Fwd_06--Kinnex16S_Rev_22	sediment	isolate_source		900	635			35.33213	24.08346	2022-08-09	Sediment sample from at -900 m depth water curtain also used for isolates
+C9_1_A	C9	1	Kinnex16S_Fwd_03--Kinnex16S_Rev_21	sediment	transect		1050	485			35.33213	24.08346	2022-08-09	Sediment sample from at -1050 m depth from black biofilm
+C9_2_A	C9	2	Kinnex16S_Fwd_03--Kinnex16S_Rev_22	sediment	transect		1050	485			35.33213	24.08346	2022-08-09	Sediment sample from at -1050 m depth from black biofilm
+C9I_1_A	C9_I	1	Kinnex16S_Fwd_06--Kinnex16S_Rev_25	sediment	isolate_source		1050	485			35.33213	24.08346	2022-08-09	Sediment sample from at -1050 m depth from black biofilm also used for isolates
+C9I_2_A	C9_I	2	Kinnex16S_Fwd_06--Kinnex16S_Rev_26	sediment	isolate_source		1050	485			35.33213	24.08346	2022-08-09	Sediment sample from at -1050 m depth from black biofilm also used for isolates
+C8_1_A	C8	1	Kinnex16S_Fwd_02--Kinnex16S_Rev_27	sediment	transect		1100	435			35.33213	24.08346	2022-08-09	Sediment sample from at -1100 m depth from the last siphon
+C8_2_A	C8	2	Kinnex16S_Fwd_02--Kinnex16S_Rev_28	sediment	transect		1100	435			35.33213	24.08346	2022-08-09	Sediment sample from at -1100 m depth from the last siphon
+C8I_1_A	C8_I	1	Kinnex16S_Fwd_06--Kinnex16S_Rev_23	sediment	isolate_source		1100	435			35.33213	24.08346	2022-08-09	Sediment sample from at -1100 m depth from the last siphon also used for isolates
+C8I_2_A	C8_I	2	Kinnex16S_Fwd_06--Kinnex16S_Rev_24	sediment	isolate_source		1100	435			35.33213	24.08346	2022-08-09	Sediment sample from at -1100 m depth from the last siphon also used for isolates
+W1_1_A	W1	1	Kinnex16S_Fwd_03--Kinnex16S_Rev_23	water	transect		433	1102	6.6	187.2	35.33213	24.08346	2022-08-09	Freshwater sample under the base of Leon pit
+W1_2_A	W1	2	Kinnex16S_Fwd_03--Kinnex16S_Rev_24	water	transect		433	1102	6.6	187.2	35.33213	24.08346	2022-08-09	Freshwater sample under the base of Leon pit
+W2_1_A	W2	1	Kinnex16S_Fwd_03--Kinnex16S_Rev_25	water	transect		677	858	7.3	178.6	35.33213	24.08346	2022-08-09	Freshwater sample at the first syphon
+W2_2_A	W2	2	Kinnex16S_Fwd_03--Kinnex16S_Rev_26	water	transect		677	858	7.3	178.6	35.33213	24.08346	2022-08-09	Freshwater sample at the first syphon
+W3_1_A	W3	1	Kinnex16S_Fwd_03--Kinnex16S_Rev_27	water	transect		763	772	7.6	188.5	35.33213	24.08346	2022-08-09	Freshwater sample at Marcel waterfall
+W3_2_A	W3	2	Kinnex16S_Fwd_03--Kinnex16S_Rev_28	water	transect		763	772	7.6	188.5	35.33213	24.08346	2022-08-09	Freshwater sample at Marcel waterfall
+W4_1_A	W4	1	Kinnex16S_Fwd_04--Kinnex16S_Rev_21	water	transect		903	632	7.9	188.5	35.33213	24.08346	2022-08-09	Freshwater sample at -903 under water curtain
+W4_2_A	W4	2	Kinnex16S_Fwd_04--Kinnex16S_Rev_22	water	transect		903	632	7.9	188.5	35.33213	24.08346	2022-08-09	Freshwater sample at -903 under water curtain
+W5_1_A	W5	1	Kinnex16S_Fwd_04--Kinnex16S_Rev_23	water	transect		1100	435	195.9	8.4	35.33213	24.08346	2022-08-09	Freshwater sample at the last syphon at -1100 m depth
+W5_2_A	W5	2	Kinnex16S_Fwd_04--Kinnex16S_Rev_24	water	transect		1100	435	195.9	8.4	35.33213	24.08346	2022-08-09	Freshwater sample at the last syphon at -1100 m depth

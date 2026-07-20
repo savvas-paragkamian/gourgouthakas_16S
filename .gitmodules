@@ -1,0 +1,3 @@
+[submodule "HiFi-16S-workflow"]
+	path = HiFi-16S-workflow
+	url = https://github.com/savvas-paragkamian/HiFi-16S-workflow.git
