@@ -10,6 +10,16 @@
 #
 # The container gets the repo at /work and the database directory at
 # /databases. Nothing is installed on the host beyond podman.
+#
+# Runs from either side of the container boundary:
+#   * on the host  — launches podman with the mounts and flags set up below
+#   * inside the image (e.g. a gourgouthakas-dev shell) — detects that and execs
+#     nextflow directly, instead of nesting podman inside podman
+#
+# Env overrides:
+#   IMAGE=localhost/gourgouthakas-dev   use a different image
+#   DB_DIR=/path/to/databases           databases live elsewhere
+#   DETACH=1                            background the run (use for full runs)
 
 set -euo pipefail
 
@@ -18,11 +28,33 @@ IMAGE="${IMAGE:-localhost/gourgouthakas-16s:latest}"
 DB_DIR="${DB_DIR:-/mnt/data/databases}"
 ACTION="${1:-run}"
 
-mkdir -p "$DB_DIR" "$ROOT/results" "$ROOT/work"
+# Are we already inside a container? If so this script must NOT call podman —
+# that would mean nested rootless podman, which is painful and unnecessary,
+# since every tool the pipeline needs is already on PATH here. Instead the
+# nextflow command is exec'd directly, so the same script works unchanged from
+# the host or from a shell inside gourgouthakas-16s / gourgouthakas-dev.
+if [ -f /run/.containerenv ] || [ -f /.dockerenv ] || [ -n "${container:-}" ]; then
+    IN_CONTAINER=1
+else
+    IN_CONTAINER=0
+fi
+
+mkdir -p "$ROOT/results" "$ROOT/work"
+[ "$IN_CONTAINER" = "0" ] && mkdir -p "$DB_DIR"
 
 # --userns=keep-id maps the caller to the same uid inside the container, so
 # results and the work dir come back owned by the host user.
 run_in_container() {
+    # Already inside the image: run it here. The pipeline env is prepended to
+    # PATH by scripts/nextflow.config, exactly as it would be under podman.
+    if [ "$IN_CONTAINER" = "1" ]; then
+        if [ ! -d /databases ]; then
+            echo "warning: /databases is not mounted — start the container with -v \$DB_DIR:/databases" >&2
+        fi
+        cd "$ROOT"
+        exec bash -lc "$1"
+    fi
+
     # Allocate a TTY only when there is one; otherwise podman fails outright
     # when this is run from a script, a cron job or a CI log.
     local tty_flag=()
