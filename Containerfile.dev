@@ -1,0 +1,54 @@
+# Interactive development image: the full analysis stack + editors and CLIs.
+#
+#   podman build -f Containerfile.dev -t gourgouthakas-dev .
+#
+# Layers on the analysis image, so it is a strict superset — same R, same
+# pinned hifi16s env, same Nextflow. A pipeline run started here produces
+# identical results to one started in gourgouthakas-16s.
+#
+# The split exists so that convenience never changes what is reproducible:
+# `Containerfile` stays a clean, shippable artifact that a reviewer can rebuild,
+# while the churn of editors and AI CLIs is confined to this file. Note the
+# npm install below is intentionally unpinned — fine for a dev tool, which is
+# exactly why it does not belong in the analysis image.
+#
+# Run it with the repo and databases mounted:
+#
+#   podman run --rm -it --userns=keep-id --security-opt label=disable \
+#     -e HOME=/tmp \
+#     -v "$PWD:/work" -v /mnt/data/databases:/databases -w /work \
+#     -v ~/.dotfiles/nvim/init.lua:/root/.config/nvim/init.lua:ro \
+#     -v ~/.dotfiles/tmux/tmux.conf:/root/.tmux.conf:ro \
+#     localhost/gourgouthakas-dev
+#
+# Then, inside, the same script works — it detects the container and runs
+# nextflow directly rather than nesting podman:
+#
+#   ./scripts/run_pipeline.sh resume
+#
+# Long runs started from an interactive shell die when the shell exits, so use
+# tmux inside the container, or start the container detached with -d.
+#
+# Dotfiles are mounted at run time rather than COPYed: the build context here is
+# the repo, which does not contain them, and mounting keeps them live rather
+# than baked into a stale layer.
+
+FROM localhost/gourgouthakas-16s:latest
+
+RUN dnf install -y \
+        neovim \
+        tmux \
+        w3m \
+        nodejs \
+        npm \
+        ripgrep \
+        fd-find \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+RUN npm install -g @anthropic-ai/claude-code
+
+RUN mkdir -p /root/.config/nvim /root/.vim/undodir
+
+WORKDIR /work
+CMD ["/bin/bash"]
