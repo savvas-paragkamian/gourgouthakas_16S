@@ -309,20 +309,96 @@ this dataset, not a generic default.
   `alpha_depth_suggested.txt` (116877) is a much higher *saturation* depth
   (how deep the curve needs to go to plateau), not a depth to rarefy to;
   using it would drop all but a handful of the highest-biomass libraries.
-  15/51 samples fall below 499 reads and are excluded from the rarefied
-  matrix only (`03_normalize.R`) — still present in relative-abundance/CLR.
+  **This value was computed over all 51 libraries including the 5 controls**
+  (`HiFi-16S-workflow/bin/final_stats.R` sorts every sample's final read
+  count with no `sample_type` awareness and picks rank `floor(0.8*N)`) —
+  the near-empty blanks (`ctr_EB`=41, `ctr_MM`=70 raw reads) sit in that
+  sorted list and pull the chosen rank down. `03_normalize.R`'s T8 audit
+  reports the alternative: recomputed over the 46 real libraries alone, the
+  same rank-`floor(0.8*46)` value is **409**, not 499 — lower, not higher
+  (removing 5 shallow libraries from the bottom of the sort shifts every
+  rank above them down by 5 positions, which moves the 80th-percentile
+  cutoff to a shallower point in the real-sample distribution than where
+  it sat in the mixed 51-library list). **Stop-and-ask, not changed**: this
+  script still rarefies to 499, the upstream value. 12/46 samples fall
+  below 499 reads and are excluded from the rarefied matrix only
+  (`03_normalize.R`) — still present in relative-abundance/CLR.
 
-- **CLR needs its own, coarser ASV filter.** The general QC prevalence
-  filter (`02_qc_filter.R`, ≥2 samples) leaves 15,460 ASVs — far too sparse
-  for compositional zero-replacement: `zCompositions::cmultRepl()`'s default
-  thresholds (`z.warning`/`z.delete` = 0.8/`TRUE`) **silently dropped 33/51
-  samples** the first time this ran, because most ASVs are zero in >80% of
-  samples at that resolution. Fixed in `03_normalize.R` with a CLR-specific
-  ≥10%-of-samples prevalence filter (717 ASVs) plus `z.delete = FALSE`
-  explicitly, so a still-sparse sample (the low-diversity mocks, by design;
-  the shallowest sediment libraries) gets a warning, never a silent drop.
-  Check `setequal(rownames(counts_clr), rownames(counts_clean))` after any
-  change here — it should always be `TRUE`.
+- **CLR needs its own, coarser ASV filter, re-derived on the 46
+  control-free libraries.** The general QC prevalence filter (now
+  `02b_controls.R`'s final gate, ≥2 samples, controls already dropped)
+  leaves 15,457 ASVs — far too sparse for compositional zero-replacement:
+  `zCompositions::cmultRepl()`'s default thresholds (`z.warning`/`z.delete`
+  = 0.8/`TRUE`) **silently dropped samples** the first time this ran,
+  because most ASVs are zero in >80% of samples at that resolution. Fixed
+  in `03_normalize.R` with a CLR-specific ≥5-of-46-samples (~10.9%)
+  prevalence filter (1,201 ASVs, up from 717 when the same ~10% threshold
+  was computed over the control-contaminated 51-library table — the mocks'
+  low diversity had been inflating apparent sparsity, as the original
+  controls plan suspected) plus `z.delete = FALSE` explicitly, so a still-
+  sparse sample (the shallowest sediment libraries) gets a warning, never a
+  silent drop. Check `setequal(rownames(counts_clr), rownames(counts_clean))`
+  after any change here — it should always be `TRUE`.
+
+- **Controls were leaking into the ecological analysis — fixed by
+  reordering the filter pipeline and splitting `02_qc_filter.R` into two
+  scripts.** The old order prevalence-filtered (≥2 samples) while the 5
+  control columns (`ctr_EB`, `ctr_MM`, `ctr_zymo_com`, `ctr_zymo_log`,
+  `ctr_msa_3001`) were still present, so an ASV seen only in `ctr_EB` +
+  `ctr_MM` and nowhere real could pass on the controls' strength alone, and
+  `03_normalize.R`'s old CLR filter (≥10% of 51 samples) had the identical
+  problem. `02_qc_filter.R` now stops after lineage-filtering + library-size
+  QC + flagging (not removing) `decontam` candidates, and hands off
+  `counts_postlineage.rds`/`taxonomy_postlineage.rds` (controls still
+  present) to the new **`scripts/02b_controls.R`**, which: (T1) normalizes
+  GTDB/GG2 polyphyly-split genus suffixes (`_[A-Z]`, `_[A-Z]_[0-9]+` —
+  confirmed both databases need this, not just GTDB, from the same ASV
+  reading `Akkermansia_muciniphila_A` under GTDB and
+  `Akkermansia_muciniphila_D_776786` under GG2) against
+  `data/mock_expected.tsv`; (T2) scores all 4 classification methods against
+  the 3 mock controls; (T3) reports the ASV-level false-positive rate from
+  the mocks; (T4) inventories every ASV present in the blanks; (T5) computes
+  the bidirectional PacBio barcode-cross-talk floor; then applies the
+  `decontam` blacklist + bleed floor to the **full 51-library table**,
+  drops the 5 control libraries, *then* prevalence-filters, with a
+  `stopifnot` guard that no control row survives into `counts_clean.rds`.
+  `04`–`10` no longer need their own `sample_type != "control"` filters —
+  removed throughout, since controls never reach `metadata_clean.rds` in
+  the first place. See `data/mock_expected.tsv` for the versioned,
+  web-sourced (Zymo/ATCC product pages, cited by URL) expected compositions
+  this all scores against — not reconstructed from memory.
+
+- **Database verdict from the mock scorecard (T2): no change indicated.**
+  Scored SILVA-NB/GTDB-NB/GG2-NB/SILVA-VSEARCH against all 3 mocks
+  (`results/02b_mock_accuracy.tsv`); mean recall by method: `gg2_nb` = 0.93,
+  the best of the four. `PLAN.md`'s default `db_to_prioritize = GG2` is
+  competitive on this dataset's own mock controls, not just a generic
+  default — kept as-is.
+
+- **`decontam` runs `method="prevalence"`, `threshold=0.5`** (up from an
+  earlier, undocumented implicit 0.1), against `ctr_EB` + `ctr_MM` (n=2
+  negatives) with no `batch` argument — there is no extraction-date/plate
+  field recorded anywhere in `data/` to stratify on, a limitation, not an
+  oversight. n=2 negatives is thin statistical power at *any* threshold;
+  its output (`results/02b_contaminant_candidates.tsv`) is a **manual-review
+  candidate list, not automated removal** — a `decision` column, empty on
+  first run, that a human fills in and the script round-trips on every
+  subsequent run into `results/02b_contaminant_blacklist.tsv`. **Do not read
+  an empty blacklist as a clean bill of health**: `ctr_EB` (41 raw reads)
+  and `ctr_MM` (70 raw reads) are shallow negatives, so contamination
+  screening here is limited by control read depth, not exhaustive.
+
+- **Bidirectional bleed floor (T5) came back at 0.00000 (0%)** — no
+  mock-exclusive ASV was detected in any real sample, and no cave/water-
+  characteristic genus (prevalence ≥5 in reals) was detected in any mock,
+  across the full 51-library table. This is a real, plausible finding for
+  PacBio (barcode demultiplexing has much higher specificity than Illumina
+  index-hopping — a different mechanism, not comparable to Illumina hop-rate
+  expectations), not a bug in the check. Directly answers the question this
+  investigation started from: Akkermansia's sediment abundance sits above
+  a floor of 0, i.e. this check gives no evidence for or against it being
+  cross-talk — its presence has to be evaluated on its own taxonomic/
+  ecological merits, not waved away as bleed.
 
 - **`conductivity_ms` is too sparse (19.6% complete) to be a primary
   predictor.** Including it in `07_environmental_drivers.R`'s db-RDA drops
@@ -336,6 +412,20 @@ this dataset, not a generic default.
 - **`elevation_m` is `depth_m`'s exact complement** (`depth_m + elevation_m
   = 1535` constant, confirmed numerically, cor = -1) — excluded from every
   model, not just deprioritized in VIF, to avoid perfect collinearity.
+
+- **`vegan::adonis2(..., by = "margin")` on a formula with an interaction
+  silently drops the main effects.** `06_beta_diversity.R` originally fit
+  `~ sample_type * depth_m` with `by = "margin"` and got back a table with
+  *only* the interaction row (R²=0.027, marginal p) — not a bug, that's
+  documented `adonis2` behavior (main effects inside an interaction aren't
+  marginally estimable), but it silently hid a much stronger result: fit
+  additively (`~ sample_type + depth_m`, `by = "margin"`), both main effects
+  are highly significant on their own (R²=0.053/0.056, p=0.001/0.001).
+  `results/06_permanova.tsv` now reports both: the additive model as
+  primary (`model == "additive_marginal"`), the full interactive model
+  sequentially (`by = "terms"`) alongside it so the interaction term
+  (sample_type's effect depending on depth) is still visible, just not at
+  the cost of hiding the main effects.
 
 - **`vegan::plot.varpart()` clips long `Xnames`** (`"depth_m"`,
   `"temperature_c"` both ran off the device edge at default margins) —
@@ -352,6 +442,41 @@ this dataset, not a generic default.
   a bug — ALDEx2's Monte-Carlo compositional-uncertainty approach is
   markedly more conservative, and N is unbalanced (36 sediment vs. 10
   water). Report both numbers; don't quietly pick the one with hits.
+
+- **`11_faprotax.R` predicts functional guilds (nitrification, sulfate
+  respiration, methanotrophy, fermentation, ...) from ASV taxonomy using
+  FAPROTAX (Louca et al. 2016)** — the same tool
+  `isd_archive_scripts/isd_crete_workflow.sh` used, run the same way (the
+  official `collapse_table.py` against the official `FAPROTAX.txt`), but
+  new to this project's own `00`-`10` pipeline. Needs Python + `numpy`,
+  which the container's system `python3` has neither of (no `pip` either);
+  the script builds and reuses a local venv + downloads FAPROTAX 1.2.12
+  itself, both under `tools/faprotax/` (`.gitignore`'d — vendored tool, not
+  source). `-n none` (raw summed reads per group) is used instead of
+  FAPROTAX's own normalization, then relative abundance is computed the
+  same way as `05_taxonomic_composition.R` (divide by `library_size`), so
+  every script in this pipeline normalizes on the same convention.
+
+  **FAPROTAX's database is written against pre-GTDB (SILVA/NCBI-style)
+  names** (`Proteobacteria`, `Firmicutes`, ...); this project's taxonomy is
+  GTDB-style (`Pseudomonadota`, `Bacillota`, ...). Measured, not assumed:
+  **64.2% of reads (71.6% of ASVs) matched no functional group at all**
+  (`results/11_faprotax_unassigned.tsv`, corroborated by
+  `results/11_faprotax_report.txt`'s own tally). Spot-checked directly
+  against `Nitrospira` (a real, non-trivial genus in the sediment samples,
+  ~0.3–0.5% relative abundance per `results/05_genus_relabund.tsv`) — it
+  lands in **no** FAPROTAX group, for two compounding reasons confirmed by
+  reading `FAPROTAX.txt` itself: (1) FAPROTAX's nitrification entries name
+  specific comammox species (`Nitrospira nitrosa/nitrificans/inopinata`),
+  not the bare genus — DADA2 ASVs unresolved to species (`s__NA`, common
+  here) can never match those regardless of naming convention; (2) the one
+  broader rule is class-level (`*Nitrospirae*Nitrospiria*`) and uses the
+  pre-GTDB phylum spelling `Nitrospirae`, which doesn't match this
+  project's GTDB `Nitrospirota` string — a direct, confirmed instance of
+  the naming-mismatch concern, not a hypothetical one. Read
+  `results/11_faprotax_relabund.tsv` with this substantial, disclosed
+  under-matching in mind — it undercounts guild membership, particularly
+  for species-unresolved ASVs and any group defined above the genus level.
 
 - **Replicate concordance found real disagreement, not just noise:** 14/18
   biological-replicate pairs (`sample_set` transect vs. isolate_source, same

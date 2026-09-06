@@ -12,7 +12,9 @@ alpha <- readr::read_tsv("results/alpha_diversity.tsv", show_col_types = FALSE)
 ord_coords <- readr::read_tsv("results/06_ordination_coords.tsv", show_col_types = FALSE) |>
   dplyr::filter(distance == "bray")
 
-eco_samples <- metadata$sample_id[metadata$sample_type != "control" & !is.na(metadata$depth_m)]
+# Controls already dropped upstream in 02b_controls.R; !is.na(depth_m) stays
+# as a distinct, still-legitimate guard (not caused by controls).
+eco_samples <- metadata$sample_id[!is.na(metadata$depth_m)]
 
 # --- distance-decay in depth space -----------------------------------------
 # The figure PLAN.md §09 asks for, in depth space rather than geographic

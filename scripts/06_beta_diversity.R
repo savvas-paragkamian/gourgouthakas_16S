@@ -7,11 +7,12 @@ counts_relabund <- readRDS(file.path(path_processed, "counts_relabund.rds"))
 counts_clr <- readRDS(file.path(path_processed, "counts_clr.rds"))
 metadata <- readRDS(file.path(path_processed, "metadata_clean.rds"))
 
-# Uses whichever matrix 02_qc_filter.R's replicate-concordance step decided on
+# Uses whichever matrix 02b_controls.R's replicate-concordance step decided on
 # (results/replicate_concordance_decision.tsv). Both replicate levels are NOT
-# pooled by default there, so this runs on the full 51-library, unpooled
-# matrix -- ordinations below are colored by tech_rep/bio_rep as a visual
-# re-check of that call before interpreting any other grouping.
+# pooled by default there, so this runs on the full 46-library (control-free,
+# per AGENTS.md), unpooled matrix -- ordinations below are colored by
+# tech_rep/bio_rep as a visual re-check of that call before interpreting any
+# other grouping.
 pooling_decision <- readr::read_tsv("results/replicate_concordance_decision.tsv", show_col_types = FALSE)
 if (any(pooling_decision$pooled_by_default)) {
   warning("[06_beta_diversity] pooling_decision has pooled_by_default = TRUE somewhere -- this script still assumes the unpooled matrix; update it if that decision changes.")
@@ -71,7 +72,7 @@ save_plot(p_pcoa_aitch_type, "06_pcoa_aitchison_sample_type", w = 6, h = 5)
 # Replicate re-check: color the same Bray PCoA by tech_rep and bio_rep. If
 # replicates were truly interchangeable, these should NOT separate samples
 # the way sample_type/depth does -- if they visibly do, that's independent
-# support for the concordance flags already written in 02_qc_filter.R.
+# support for the concordance flags already written in 02b_controls.R.
 p_pcoa_techrep <- plot_ordination(ord_bray$coords, "PCoA1", "PCoA2", "tech_rep", NULL,
                                    "PCoA (Bray-Curtis), colored by technical replicate")
 save_plot(p_pcoa_techrep, "06_pcoa_bray_tech_rep", w = 6, h = 5)
@@ -86,19 +87,38 @@ p_pcoa_depth <- plot_ordination(ord_bray$coords, "PCoA1", "PCoA2", "depth_m", NU
 save_plot(p_pcoa_depth, "06_pcoa_bray_depth", w = 6, h = 5)
 
 # --- PERMANOVA + betadisper -------------------------------------------------
-# Ecological subset only (sediment + water; controls excluded, same
-# rationale as 04_alpha_diversity.R -- they're QC artifacts, not part of the
-# environmental gradient).
-eco_samples <- metadata$sample_id[metadata$sample_type != "control"]
-meta_eco <- metadata[match(eco_samples, metadata$sample_id), ]
+# Controls were already dropped in 02b_controls.R (QC artifacts, not part of
+# the environmental gradient) -- `metadata` here is already sediment + water
+# only, no filter needed.
+eco_samples <- metadata$sample_id
+meta_eco <- metadata
 
 run_permanova <- function(dist_obj, samples, meta_eco, label) {
-  d <- as.matrix(dist_obj)[samples, samples]
-  fit <- vegan::adonis2(stats::as.dist(d) ~ sample_type * depth_m, data = meta_eco, by = "margin", permutations = 999)
-  disp <- vegan::betadisper(stats::as.dist(d), meta_eco$sample_type)
+  d <- stats::as.dist(as.matrix(dist_obj)[samples, samples])
+
+  # `by = "margin"` on a formula that carries an interaction only reports
+  # the highest-order term -- main effects that participate in an
+  # interaction aren't marginally estimable in that framework, so
+  # `sample_type * depth_m` with by="margin" silently returned *just* the
+  # interaction row (R2=0.027, a middling p) and dropped both main effects
+  # entirely. Checked what those main effects actually look like: fit
+  # separately (additive model, by="margin", both terms individually
+  # meaningful) they're each highly significant (R2~0.05-0.06, p=0.001) --
+  # a materially stronger and more informative result than the interaction
+  # alone. Both models are reported now: the additive one as primary (each
+  # main effect's own marginal contribution), the full interactive one
+  # sequentially (by="terms") to also show whether sample_type's effect
+  # depends on depth, which the additive model can't address.
+  fit_additive <- vegan::adonis2(d ~ sample_type + depth_m, data = meta_eco, by = "margin", permutations = 999)
+  fit_interaction <- vegan::adonis2(d ~ sample_type * depth_m, data = meta_eco, by = "terms", permutations = 999)
+
+  disp <- vegan::betadisper(d, meta_eco$sample_type)
   disp_test <- vegan::permutest(disp, permutations = 999)
   list(
-    adonis = tidy_adonis2(fit) |> dplyr::mutate(distance = label),
+    adonis = dplyr::bind_rows(
+      tidy_adonis2(fit_additive) |> dplyr::mutate(model = "additive_marginal"),
+      tidy_adonis2(fit_interaction) |> dplyr::mutate(model = "interaction_sequential")
+    ) |> dplyr::mutate(distance = label),
     betadisper_p = disp_test$tab$`Pr(>F)`[1]
   )
 }
@@ -113,7 +133,12 @@ write_result(
   "06_betadisper"
 )
 
+bray_additive <- perm_bray$adonis |> dplyr::filter(model == "additive_marginal", !term %in% c("Residual", "Total"))
 message(sprintf(
-  "[06_beta_diversity] PERMANOVA (sample_type*depth_m, sediment+water only): betadisper p = %.3f (bray), %.3f (aitchison) -- a small p means dispersion differs between groups and the PERMANOVA result may partly reflect that rather than location",
+  "[06_beta_diversity] PERMANOVA (Bray, sediment+water, additive): %s",
+  paste(sprintf("%s R2=%.3f p=%s", bray_additive$term, bray_additive$R2, bray_additive$Pr_F_), collapse = "; ")
+))
+message(sprintf(
+  "[06_beta_diversity] betadisper p = %.3f (bray), %.3f (aitchison) -- a small p means dispersion differs between groups and the PERMANOVA result may partly reflect that rather than location",
   perm_bray$betadisper_p, perm_aitchison$betadisper_p
 ))

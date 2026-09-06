@@ -22,8 +22,7 @@ p1a <- ggplot2::ggplot(decay_df, ggplot2::aes(depth_distance, bray_dissimilarity
   ggplot2::geom_smooth(method = "loess", formula = y ~ x, color = "black", se = TRUE) +
   ggplot2::labs(x = "Depth distance (m)", y = "Bray-Curtis dissimilarity", color = NULL, title = "A. Distance-decay in depth space")
 
-p1b <- alpha |>
-  dplyr::filter(sample_type != "control") |>
+p1b <- alpha |> # controls already dropped upstream in 02b_controls.R
   ggplot2::ggplot(ggplot2::aes(depth_m, shannon, color = sample_type)) +
   ggplot2::geom_point(size = 1.5, alpha = 0.7) +
   ggplot2::geom_smooth(method = "lm", formula = y ~ x, se = TRUE) +
@@ -41,8 +40,12 @@ p2a <- ord_coords |>
   ggplot2::scale_color_manual(values = palette_sample_type()) +
   ggplot2::labs(title = "A. PCoA (Bray-Curtis)", color = NULL)
 
+# additive_marginal only: each main effect's own marginal R2/p, the cleaner
+# primary result (see 06_beta_diversity.R for why the interaction model
+# can't report main effects marginally, and results/06_permanova.tsv for
+# both models in full).
 permanova_tbl <- permanova |>
-  dplyr::filter(distance == "bray", term != "Residual", term != "Total") |>
+  dplyr::filter(distance == "bray", model == "additive_marginal", !term %in% c("Residual", "Total")) |>
   dplyr::transmute(Term = term, R2 = sprintf("%.3f", R2), F = sprintf("%.2f", F), `p` = sprintf("%.3f", Pr_F_))
 p2b <- gridExtra_table(permanova_tbl, "B. PERMANOVA (Bray, sediment + water)")
 
@@ -81,8 +84,8 @@ save_plot(fig3, "fig3_drivers_varpart", w = 10, h = 5)
 # --- Fig 4: composition + differential abundance ----------------------------
 top_phyla <- phylum_long |> dplyr::group_by(phylum) |> dplyr::summarise(m = mean(rel_abund)) |> dplyr::slice_max(m, n = 8) |> dplyr::pull(phylum)
 # Explicit sample order by sample_type then depth_m -- fct_reorder()'s
-# automatic median-based ordering chokes on NA depth_m (controls) once
-# there are duplicate sample_id rows (one per phylum); see 05's fix.
+# automatic median-based ordering chokes on duplicate sample_id rows (one
+# per phylum) once there are ties; see 05's fix.
 sample_order <- metadata |> dplyr::arrange(sample_type, depth_m) |> dplyr::pull(sample_id)
 p4a <- phylum_long |>
   dplyr::mutate(phylum2 = ifelse(phylum %in% top_phyla, phylum, "Other")) |>

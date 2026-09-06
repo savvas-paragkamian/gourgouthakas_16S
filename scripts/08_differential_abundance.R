@@ -1,6 +1,6 @@
 # 08_differential_abundance.R — ALDEx2 (primary) + Maaslin2 (cross-check),
-# contrast = sample_type (sediment vs. water; controls excluded, same
-# rationale as 04/06). Report the intersection.
+# contrast = sample_type (sediment vs. water; controls already dropped
+# upstream in 02b_controls.R). Report the intersection.
 
 source("scripts/00_setup.R")
 
@@ -8,9 +8,9 @@ counts <- readRDS(file.path(path_processed, "counts_clean.rds"))
 taxonomy <- readRDS(file.path(path_processed, "taxonomy_clean.rds"))
 metadata <- readRDS(file.path(path_processed, "metadata_clean.rds"))
 
-eco_samples <- metadata$sample_id[metadata$sample_type != "control"]
+eco_samples <- metadata$sample_id
 counts_eco <- counts[eco_samples, , drop = FALSE]
-meta_eco <- metadata[match(eco_samples, metadata$sample_id), ]
+meta_eco <- metadata
 conditions <- meta_eco$sample_type
 stopifnot(dplyr::n_distinct(conditions) == 2L) # aldex.ttest/effect assume a 2-group contrast
 

@@ -43,9 +43,9 @@ top_n_barplot <- function(long, rank, n_top, metadata, title) {
     dplyr::pull(.data[[rank]])
 
   # Order samples by sample_type then depth_m explicitly -- fct_reorder()'s
-  # automatic (median-based) ordering chokes on NA depth_m (the controls,
-  # which have no depth) once there are duplicate sample_id rows (one per
-  # taxon), so the level order is built by hand instead.
+  # automatic (median-based) ordering chokes on duplicate sample_id rows
+  # (one per taxon) once there are ties, so the level order is built by
+  # hand instead.
   sample_order <- metadata |>
     dplyr::arrange(sample_type, depth_m) |>
     dplyr::pull(sample_id)
@@ -62,19 +62,38 @@ top_n_barplot <- function(long, rank, n_top, metadata, title) {
 
   pal <- stats::setNames(c(palette_other, palette_taxa(length(top_taxa))), levels(plot_df$taxon))
 
-  ggplot2::ggplot(plot_df, ggplot2::aes(x = sample_id, y = rel_abund, fill = taxon)) +
+  p_composition <- ggplot2::ggplot(plot_df, ggplot2::aes(x = sample_id, y = rel_abund, fill = taxon)) +
     ggplot2::geom_col() +
     ggplot2::facet_grid(~sample_type, scales = "free_x", space = "free_x") +
     ggplot2::scale_fill_manual(values = pal) +
     ggplot2::labs(x = NULL, y = "Relative abundance", fill = rank, title = title) +
-    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5, size = 6))
+    ggplot2::theme(axis.text.x = ggplot2::element_blank(), axis.ticks.x = ggplot2::element_blank())
+
+  # Read-depth strip, same x order/facets as the composition panel above --
+  # a taxon at 44% of a library means something different at 300 reads than
+  # at 300,000. Without this, the composition plot alone can't tell you
+  # which. Log-scale bars, no fill legend (would just repeat sample_type,
+  # already visible via the facet strip above).
+  p_depth <- tibble::tibble(sample_id = names(lib_sizes), library_size = lib_sizes) |>
+    dplyr::filter(sample_id %in% levels(plot_df$sample_id)) |>
+    dplyr::mutate(sample_id = factor(sample_id, levels = levels(plot_df$sample_id))) |>
+    dplyr::left_join(metadata |> dplyr::select(sample_id, sample_type), by = "sample_id") |>
+    ggplot2::ggplot(ggplot2::aes(x = sample_id, y = library_size)) +
+    ggplot2::geom_col(fill = "grey40") +
+    ggplot2::facet_grid(~sample_type, scales = "free_x", space = "free_x") +
+    ggplot2::scale_y_log10() +
+    ggplot2::labs(x = NULL, y = "Reads\n(log10)") +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5, size = 6),
+                    strip.text = ggplot2::element_blank())
+
+  p_composition / p_depth + patchwork::plot_layout(heights = c(4, 1))
 }
 
 p_phylum <- top_n_barplot(phylum_long, "phylum", 10, metadata, "Phylum composition (top 10, ordered by depth within sample type)")
-save_plot(p_phylum, "05_phylum_barplot", w = 10, h = 6)
+save_plot(p_phylum, "05_phylum_barplot", w = 10, h = 7)
 
 p_genus <- top_n_barplot(genus_long, "genus", 15, metadata, "Genus composition (top 15, ordered by depth within sample type)")
-save_plot(p_genus, "05_genus_barplot", w = 10, h = 6)
+save_plot(p_genus, "05_genus_barplot", w = 10, h = 7)
 
 # --- core taxa --------------------------------------------------------
 # Core within each sample_type: present (rel_abund > 0) in >= 80% of that

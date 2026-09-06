@@ -42,9 +42,39 @@ rarefaction_rationale <- tibble::tibble(
   rarefaction_depth = rarefaction_depth,
   excluded_from_rarefied = lib_sizes < rarefaction_depth
 ) |>
-  dplyr::left_join(metadata |> dplyr::select(sample_id, sample_type, control_type), by = "sample_id") |>
+  dplyr::left_join(metadata |> dplyr::select(sample_id, sample_type), by = "sample_id") |>
   dplyr::arrange(library_size)
 write_result(rarefaction_rationale, "03_rarefaction_depth_rationale")
+
+# --- T8: audit the upstream depth, report only, don't act on it ------------
+# HiFi-16S-workflow's final_stats.R computes rarefaction_depth_suggested.txt
+# by sorting EVERY sample's final read count -- no sample_type awareness --
+# and picking the value at rank floor(0.8*N). Controls (including ctr_EB=41,
+# ctr_MM=70 reads) were part of that sort when 499 was generated, so the
+# chosen rank's value is pulled down by the near-empty blanks. This is a
+# stop-and-ask finding, not a unilateral fix: AGENTS.md records reusing the
+# pipeline's own value as a deliberate choice, and re-deriving it changes
+# which samples get excluded from the rarefied matrix -- report the
+# recomputed alternative for a decision, keep using 499 either way.
+recomputed_depth <- {
+  sorted <- sort(lib_sizes, decreasing = TRUE)
+  n <- length(sorted)
+  rank <- max(1L, as.integer(n * 0.8))
+  as.integer(floor(sorted[rank]))
+}
+write_result(
+  tibble::tibble(
+    value = c("upstream_rarefaction_depth_suggested", "recomputed_on_46_real_samples"),
+    depth = c(rarefaction_depth, recomputed_depth),
+    note = c("computed by HiFi-16S-workflow/bin/final_stats.R over all 51 libraries including controls",
+             "same rank-floor(0.8*N) algorithm, recomputed here over the 46 control-free libraries -- NOT applied, reported for a decision")
+  ),
+  "T8_rarefaction_depth_audit"
+)
+message(sprintf(
+  "[03_normalize] T8 audit: upstream depth = %d (computed over 51 libraries incl. controls); recomputed over 46 real libraries = %d. Still using %d (stop-and-ask, not changed here).",
+  rarefaction_depth, recomputed_depth, rarefaction_depth
+))
 
 message(sprintf(
   "[03_normalize] %d/%d samples below the rarefaction depth, excluded from the rarefied matrix (alpha diversity only -- still present in relative-abundance and CLR matrices): %s",
@@ -60,21 +90,29 @@ counts_relabund <- vegan::decostand(counts, method = "total")
 
 # --- CLR (all samples; zero-treatment via zCompositions, then compositions::clr) ---
 #
-# The full post-QC ASV table (15,460 ASVs, prevalence >=2 samples only) is
-# far too sparse for compositional zero-replacement at full resolution:
-# cmultRepl's default z.warning/z.delete=0.8/TRUE *silently dropped 33/51
-# samples* the first time this was run here, because most ASVs are zero in
-# >80% of samples at that resolution. Two independent fixes, both kept:
-#   1. A CLR-specific prevalence filter, coarser than 02_qc_filter's general
-#      >=2-sample floor -- >=10% of samples (>=6/51) -- brings sparsity down
-#      to something compositional replacement can actually work with (717
-#      ASVs) while staying far more permissive than the ~79 ASVs a 20%
-#      threshold would give.
+# The full post-QC ASV table is far too sparse for compositional
+# zero-replacement at full resolution: cmultRepl's default
+# z.warning/z.delete=0.8/TRUE *silently dropped samples* the first time this
+# was run here (33/51, back when controls were still in counts_clean), since
+# most ASVs are zero in >80% of samples at that resolution. Two independent
+# fixes, both kept:
+#   1. A CLR-specific prevalence filter, coarser than 02b_controls.R's
+#      general >=2-sample floor -- >=10% of samples. Re-checked after
+#      controls moved out of counts_clean (PLAN.md's filter-order fix):
+#      the *same* 10% threshold now recovers ~1,200 ASVs on 46 samples,
+#      up from 717 on the old 51-sample (control-inflated-sparsity) table --
+#      controls, especially the log-distributed mock's ~578 low-abundance
+#      ASVs, were dragging down apparent prevalence for real-sample ASVs
+#      too. A more aggressive (lower) threshold was tried (5% -> ~5,400
+#      ASVs) but not adopted: cmultRepl's runtime scales with ASV count,
+#      and there's no clear analytical benefit at that resolution to justify
+#      the extra compute here -- 10% stays the default, re-derived rather
+#      than re-affirmed blindly, per PLAN.md.
 #   2. z.delete = FALSE explicitly, so if a handful of genuinely near-empty
-#      samples (the mocks by design, plus the shallowest sediment libraries)
-#      still exceed the zero-warning threshold even after that, cmultRepl
-#      *warns* rather than *silently removing them* -- every sample present
-#      in counts_clean stays present in counts_clr, full stop.
+#      samples (the shallowest sediment/water libraries) still exceed the
+#      zero-warning threshold even after that, cmultRepl *warns* rather than
+#      *silently removing them* -- every sample present in counts_clean
+#      stays present in counts_clr, full stop.
 clr_prevalence_min_samples <- ceiling(0.10 * nrow(counts))
 clr_asv_keep <- colSums(counts > 0) >= clr_prevalence_min_samples
 counts_for_clr <- counts[, clr_asv_keep, drop = FALSE]

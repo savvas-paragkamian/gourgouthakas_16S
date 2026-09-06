@@ -31,20 +31,19 @@ write_result(
 
 # --- tests -------------------------------------------------------------
 # Real contrasts per AGENTS.md departure #5: sample_type (sediment vs water)
-# and continuous depth_m. Controls are excluded from ecological testing (QC
-# artifacts, not part of the environmental gradient) but were reported above.
-alpha_eco <- alpha |> dplyr::filter(sample_type != "control")
-
+# and continuous depth_m. Controls never reach this script -- 02b_controls.R
+# drops them before metadata_clean/counts_rarefied exist -- so `alpha` here
+# is already the ecological subset, no filter needed.
 metrics <- c("observed", "shannon", "simpson", "pielou")
 
 kw_tests <- purrr::map_dfr(metrics, function(m) {
-  ft <- stats::kruskal.test(alpha_eco[[m]] ~ alpha_eco$sample_type)
+  ft <- stats::kruskal.test(alpha[[m]] ~ alpha$sample_type)
   tibble::tibble(metric = m, test = "kruskal.test ~ sample_type",
                   statistic = unname(ft$statistic), df = unname(ft$parameter), p_value = ft$p.value)
 })
 
 depth_tests <- purrr::map_dfr(metrics, function(m) {
-  fit <- stats::lm(alpha_eco[[m]] ~ depth_m * sample_type, data = alpha_eco)
+  fit <- stats::lm(alpha[[m]] ~ depth_m * sample_type, data = alpha)
   s <- summary(fit)
   tibble::tibble(
     metric = m, test = "lm(metric ~ depth_m * sample_type)",
@@ -59,7 +58,7 @@ write_result(kw_tests, "alpha_stats_sample_type")
 write_result(depth_tests, "alpha_stats_depth")
 
 # --- plots -----------------------------------------------------------------
-p_box <- alpha_eco |>
+p_box <- alpha |>
   tidyr::pivot_longer(dplyr::all_of(metrics), names_to = "metric", values_to = "value") |>
   ggplot2::ggplot(ggplot2::aes(x = sample_type, y = value, fill = sample_type)) +
   ggplot2::geom_boxplot(outlier.shape = NA) +
@@ -70,7 +69,7 @@ p_box <- alpha_eco |>
   ggplot2::theme(legend.position = "none")
 save_plot(p_box, "04_alpha_boxplot", w = 7, h = 6)
 
-p_depth <- alpha_eco |>
+p_depth <- alpha |>
   tidyr::pivot_longer(dplyr::all_of(metrics), names_to = "metric", values_to = "value") |>
   ggplot2::ggplot(ggplot2::aes(x = depth_m, y = value, color = sample_type)) +
   ggplot2::geom_point(size = 1.5, alpha = 0.7) +

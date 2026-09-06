@@ -7,6 +7,7 @@ scripts <- c(
   "00_setup.R",
   "01_import.R",
   "02_qc_filter.R",
+  "02b_controls.R",
   "03_normalize.R",
   "04_alpha_diversity.R",
   "05_taxonomic_composition.R",
@@ -14,7 +15,8 @@ scripts <- c(
   "07_environmental_drivers.R",
   "08_differential_abundance.R",
   "09_spatial_analysis.R",
-  "10_figures.R"
+  "10_figures.R",
+  "11_faprotax.R"
 )
 
 timing <- data.frame(script = character(0), seconds = numeric(0), status = character(0))

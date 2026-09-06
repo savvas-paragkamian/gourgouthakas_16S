@@ -5,6 +5,10 @@ data/PB482_SP.tar
 
 # Reference databases live outside the repo (/mnt/data/databases)
 
+# Vendored FAPROTAX tool + its local python venv (scripts/11_faprotax.R) --
+# binary/venv content, fetched by the script itself, not source
+tools/faprotax/
+
 # Nextflow
 work/
 .nextflow/

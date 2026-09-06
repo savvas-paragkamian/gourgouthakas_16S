@@ -85,6 +85,7 @@ crete-soil-health-analysis/
 │   ├── 00_setup.R
 │   ├── 01_import.R
 │   ├── 02_qc_filter.R
+│   ├── 02b_controls.R
 │   ├── 03_normalize.R
 │   ├── 04_alpha_diversity.R
 │   ├── 05_taxonomic_composition.R
@@ -140,11 +141,25 @@ chemistry into `metadata` by `sample_id`, reporting key mismatches. Prune `tree`
 to observed ASVs (`ape::keep.tip`). Save all objects to `data/processed/`; write
 a sample × variable completeness table to `results/`.
 
-### `02_qc_filter.R`
+### `02_qc_filter.R` + `02b_controls.R`
+Split across two scripts because the control libraries are simultaneously
+required as *input* (for `decontam` and a mock/bleed-based accuracy check)
+and must be fully *absent* from every downstream matrix — one script can't
+do both without a filter-order bug (an ASV surviving on control-only
+strength before controls are removed). See `AGENTS.md`'s "Downstream
+analysis notes" for the full rationale and the bug this fixed.
+
+`02_qc_filter.R`:
 - Drop non-target lineages: mitochondria, chloroplast, Eukaryota, ASVs unassigned at phylum (string-filter on `taxonomy`, then subset `counts`).
 - Library sizes: ordered depth plot; flag/remove very shallow samples.
-- If negative/extraction controls exist, run **`decontam::isContaminant`** on the count matrix (prevalence and/or frequency) and remove contaminants.
-- Prevalence filter (ASV in ≥ 2 samples) + optional low-count filter.
+- Run **`decontam::isContaminant`** (prevalence, `threshold=0.5`) on the full table (controls included) and flag — not remove — candidates, into a human-reviewed candidate list with a round-tripped `decision` column.
+- Hand off the post-lineage-filter, control-still-present matrix to `02b_controls.R`.
+
+`02b_controls.R` (controls required as input, dropped before it returns):
+- Normalize GTDB/GG2 genus names against `data/mock_expected.tsv` (the versioned, web-sourced expected mock compositions).
+- Score all classification methods against the mock controls (accuracy, ASV-level false-positive rate).
+- Inventory negative-control ASVs; compute the bidirectional bleed floor (mock-exclusive ASVs vs. cave-characteristic taxa).
+- Apply the `decontam` blacklist + bleed floor to the full table, **then** drop the control libraries, **then** prevalence filter (ASV in ≥ 2 samples) + optional low-count filter — in that order, with a `stopifnot` guard that no control row survives.
 - **Replicate concordance, at both levels present in this design — do this before any pooling decision, and before any other script pools or averages replicates:**
   - Sample IDs carry **two nested levels of replication**: a **biological** pair per site (`bio_rep`, e.g. `C1` vs `C1I` — two independent sediment samples at the same site) and, within each of those, a **technical** pair of DNA extractions (`tech_rep`, e.g. `C1_1` vs `C1_2`). The ISD reference scripts (`isd_archive_scripts/isd_crete_numerical_ecology.R`) only ever check the biological level (`loc_1`/`loc_2` pairwise dissimilarity) — deliberately extend that here to also check the technical level, since it's the finer-grained and more diagnostic of the two (a bad extraction shows up here first).
   - For each level, compute a **within-pair Bray–Curtis (and Jaccard, for presence/absence) distance** on relative abundance — same distances used downstream in `06_beta_diversity.R`, just computed early enough to gate pooling — and compare it against the distribution of **between-pair** (different site) distances at the same level. Report both as a table (`results/replicate_concordance_technical.tsv`, `results/replicate_concordance_biological.tsv`: `site`, `pair_id`, `bray`, `jaccard`, `level`) and a paired box/strip plot (within-pair vs. between-pair distance) to `plots/`.

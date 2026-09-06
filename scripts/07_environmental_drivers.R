@@ -18,8 +18,8 @@ dist_aitchison <- readRDS(file.path(path_processed, "dist_aitchison.rds"))
 # perfectly collinear, so elevation_m is dropped, not just deprioritized.
 env_candidates <- c("depth_m", "temperature_c", "conductivity_ms")
 
+# Controls already dropped in 02b_controls.R -- metadata is sediment+water only.
 env_raw <- metadata |>
-  dplyr::filter(sample_type != "control") |>
   dplyr::select(sample_id, dplyr::all_of(env_candidates))
 
 cor_mat <- stats::cor(env_raw[, env_candidates], use = "pairwise.complete.obs")
