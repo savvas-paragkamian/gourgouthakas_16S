@@ -59,7 +59,7 @@ downstream operates on them:
 - `counts` — **integer matrix, samples as rows, ASVs as columns** (vegan's expected orientation; flag this explicitly, it's the classic bug).
 - `counts_long` — tidy tibble `sample_id, asv_id, count` for ggplot/dplyr work.
 - `taxonomy` — tibble: `asv_id` + `domain, phylum, class, order, family, genus, species` (split from the lineage string) + `confidence`.
-- `metadata` — tibble: `sample_id`, `condition`, soil-chemistry columns, `lon`/`lat`.
+- `metadata` — tibble: `sample_id`, `condition`, soil-chemistry columns, `lon`/`lat`, plus the replicate-structure columns needed for §7's replicate-concordance step: `site` (the depth/location identifier shared across replicates, e.g. `C1`), `bio_rep` (biological replicate arm — e.g. `C1` vs `C1I`; parsed from `sample_set` in the upstream metadata), and `tech_rep` (technical/extraction replicate — the `_1`/`_2` suffix on `sample_id`). Parse these once in `01_import.R` rather than re-deriving them from `sample_id` strings in later scripts.
 - `tree` — `ape::phylo`, pruned to the ASVs present in `counts`.
 - (optional) `refseqs` — `DNAStringSet`.
 
@@ -74,7 +74,7 @@ after each filtering operation.
 ```
 crete-soil-health-analysis/
 ├── README.md
-├── CLAUDE.md                 # working agreement + conventions for Claude Code
+├── AGENTS.md                 # working agreement + conventions for Claude Code
 ├── renv.lock                 # pinned package versions
 ├── run_all.R                 # sources scripts 00–10 in order
 ├── Makefile                  # optional: per-target incremental rebuilds
@@ -145,6 +145,12 @@ a sample × variable completeness table to `results/`.
 - Library sizes: ordered depth plot; flag/remove very shallow samples.
 - If negative/extraction controls exist, run **`decontam::isContaminant`** on the count matrix (prevalence and/or frequency) and remove contaminants.
 - Prevalence filter (ASV in ≥ 2 samples) + optional low-count filter.
+- **Replicate concordance, at both levels present in this design — do this before any pooling decision, and before any other script pools or averages replicates:**
+  - Sample IDs carry **two nested levels of replication**: a **biological** pair per site (`bio_rep`, e.g. `C1` vs `C1I` — two independent sediment samples at the same site) and, within each of those, a **technical** pair of DNA extractions (`tech_rep`, e.g. `C1_1` vs `C1_2`). The ISD reference scripts (`isd_archive_scripts/isd_crete_numerical_ecology.R`) only ever check the biological level (`loc_1`/`loc_2` pairwise dissimilarity) — deliberately extend that here to also check the technical level, since it's the finer-grained and more diagnostic of the two (a bad extraction shows up here first).
+  - For each level, compute a **within-pair Bray–Curtis (and Jaccard, for presence/absence) distance** on relative abundance — same distances used downstream in `06_beta_diversity.R`, just computed early enough to gate pooling — and compare it against the distribution of **between-pair** (different site) distances at the same level. Report both as a table (`results/replicate_concordance_technical.tsv`, `results/replicate_concordance_biological.tsv`: `site`, `pair_id`, `bray`, `jaccard`, `level`) and a paired box/strip plot (within-pair vs. between-pair distance) to `plots/`.
+  - Also report simpler concordance signals per pair: correlation of ASV relative abundances (Spearman), and ΔASV richness / Δlibrary size — cheap sanity checks that catch a failed extraction independent of the distance metric.
+  - Flag (don't silently drop) any pair whose within-pair distance falls inside the between-pair distribution — that's a replicate that didn't reproduce, and `03_normalize.R` onward should know about it via a `flag_discordant_pair` column on `metadata` rather than have it disappear into an average.
+  - This step's output is a **decision, not just a diagnostic**: record in `results/replicate_concordance_decision.tsv` whether technical replicates are pooled (mean/sum counts per `bio_rep × site`) before `03_normalize.R`, and whether the two `bio_rep` arms are pooled or kept as a deliberate contrast downstream — either way, keep both the pooled and unpooled count matrices in `data/processed/` so the decision is reversible.
 - Re-align all objects; `assert_aligned()`. Save `*_clean.rds`; write a read/ASV retention table.
 
 ### `03_normalize.R`
@@ -167,6 +173,7 @@ a sample × variable completeness table to `results/`.
 - Outputs: composition tables to `results/`; barplots + core plot to `plots/`.
 
 ### `06_beta_diversity.R`
+- Uses whichever count matrix `02_qc_filter.R` decided on (pooled or unpooled technical/biological replicates — see `results/replicate_concordance_decision.tsv`); if kept unpooled, colour ordinations by `tech_rep`/`bio_rep` as a visual re-check that the concordance call was right before interpreting any other grouping.
 - Distances: **Bray–Curtis** (`vegan::vegdist`), **weighted & unweighted UniFrac** (`GUniFrac::GUniFrac` with `counts` + `tree`), **Aitchison** (`vegdist(clr, "euclidean")`).
 - Ordinations: **PCoA** (`ape::pcoa` / `cmdscale`) and **NMDS** (`vegan::metaMDS`, report stress); color by `condition` and gradients.
 - **PERMANOVA** (`vegan::adonis2`, `by="margin"`) + **`betadisper`**/`permutest` for dispersion homogeneity.
@@ -221,12 +228,12 @@ Consistent theme, labeled panels, journal dimensions. Write
 
 ## 10. Deliverables checklist
 
-- [ ] Repo scaffolded per §4 with filled `README.md` + `CLAUDE.md`.
-- [ ] `renv.lock` + one-command setup.
-- [ ] Scripts `00`–`10` + `functions.R`, each independently runnable, **phyloseq- and qiime-free**.
-- [ ] `run_all.R` (+ `Makefile`) reproducing everything end-to-end.
-- [ ] Figures in `plots/` (pdf+png), tables/objects in `results/`, `session_info.txt`.
-- [ ] Every statistical choice (rarefaction depth, filters, model terms) documented.
+- [x] Repo scaffolded per §4 with filled `README.md` + `AGENTS.md`.
+- [x] `renv.lock` + one-command setup (renv's autoloader needed a fix -- see AGENTS.md environment trap #3).
+- [x] Scripts `00`–`10` + `functions.R`, each independently runnable, **phyloseq- and qiime-free**.
+- [x] `run_all.R` reproducing everything end-to-end (no `Makefile` -- optional per §9, not built).
+- [x] Figures in `plots/` (pdf+png), tables/objects in `results/`, `session_info.txt`.
+- [x] Every statistical choice (rarefaction depth, filters, model terms) documented -- see AGENTS.md "Downstream analysis notes".
 
 ---
 
@@ -238,6 +245,7 @@ Consistent theme, labeled panels, journal dimensions. Write
 4. **Grouping variable(s)** (`condition`) + available **continuous soil variables** — defines contrasts + the environmental matrix.
 5. **Coordinates** present — enables/disables `09_spatial_analysis.R`.
 6. Preferred **DA method** if not defaulting to ALDEx2.
+7. **Replicate pooling threshold** — how discordant a technical (extraction) or biological pair has to be, on the §7 `02_qc_filter.R` metrics, before it's flagged rather than pooled; and whether discordant pairs are dropped, kept unpooled and carried through as-is, or pooled anyway with a caveat.
 
 ---
 

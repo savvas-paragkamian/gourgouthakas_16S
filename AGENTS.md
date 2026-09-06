@@ -51,17 +51,39 @@ them on this 16-core / 31 GB host.
 `data/md5sum-16s.txt` (run `md5sum -c` from inside `data/`, the paths are
 relative to it). `data/PB482_SP.tar` is the untouched delivery archive.
 
-51 libraries = 23 sites × 2 technical replicates + 5 controls:
+51 libraries, with **two nested levels of replication** on the sediment side:
+
+- **Biological replicates** — at each of the 9 depth sites (C1–C9), two
+  independent sediment samples were taken: the main depth-transect sample
+  (`C1`, …) and a parallel isolate-source sample (`C1_I`, …). These are the
+  `transect` / `isolate_source` arms of `sample_set` below.
+- **Technical replicates** — each of those (and each water sample) went
+  through **two independent DNA extractions**, e.g. `C1_1_A` vs `C1_2_A`. This
+  is the `replicate` column (`1`/`2`) that `build_inputs.R` parses out of the
+  library name.
 
 | Set | Sites | Libraries |
 |---|---|---|
-| `transect` sediment | C1–C9 | 18 |
-| `isolate_source` sediment | C1_I–C9_I | 18 |
-| `transect` water | W1–W5 | 10 |
-| `control` | 5 | 5 |
+| `transect` sediment | C1–C9 | 18 (9 × 2 technical reps) |
+| `isolate_source` sediment | C1_I–C9_I | 18 (9 × 2 technical reps) |
+| `transect` water | W1–W5 | 10 (5 × 2 technical reps) |
+| `control` | 5 | 5 (no replicate structure) |
+
+Water has no biological-replicate arm (no `W1_I`) — the two-level nesting
+applies to sediment only.
 
 Controls: `ctr_zymo_com`, `ctr_zymo_log`, `ctr_msa_3001` (mocks),
 `ctr_EB` (extraction blank), `ctr_MM` (mastermix blank).
+
+**Column names, and one gap to know about:** `data/metadata.tsv` has `site`
+(the *biological*-replicate-level id — `C1` and `C1_I` are two distinct
+`site` values, not one), `sample_set` (`transect` / `isolate_source` /
+`control` — the column that actually distinguishes the two biological arms),
+and `replicate` (`1`/`2`, the *technical*/extraction-replicate id). There is
+**no ready-made column pairing `C1` with `C1_I` as replicates of the same
+depth location** — derive it by stripping the `_I` suffix from `site`
+(`sub("_I$", "", site)`) if a script needs to group them, e.g. for the
+biological-replicate concordance check in `PLAN.md` §7 `02_qc_filter.R`.
 
 `scripts/build_inputs.R` (base R, runs on the host) generates
 `data/samplesheet.tsv` and `data/metadata.tsv` from the barcode map
@@ -69,9 +91,11 @@ plus the two ENA/MIxS checklist sheets. Regenerate rather than hand-editing —
 the pipeline's `inspect_metadata` process diffs the two sample-id columns and
 dies on any mismatch.
 
-**One row per library, not per site.** Technical replicates stay separate
-through the pipeline so replicate concordance can be measured before it is
-averaged away; pool them downstream, deliberately.
+**One row per library, not per site.** Both replicate levels — technical
+(extraction) and biological (`sample_set` arm) — stay separate through the
+pipeline so concordance can be measured at each level before anything is
+averaged away; pool them downstream, deliberately (`PLAN.md` §7
+`02_qc_filter.R` covers both levels explicitly).
 
 ## Departures from PLAN.md — read before implementing 02–10
 
@@ -98,7 +122,14 @@ averaged away; pool them downstream, deliberately.
 5. **`condition` in PLAN terms is not one variable here.** The real contrasts
    are `sample_type` (sediment vs. water) and the continuous `depth_m`. The
    `sample_set` column separates the transect from the isolate-source
-   sediments — do not pool those two arms without checking they agree.
+   sediments — these are the **biological replicates** at each site (see
+   "The data" above) — do not pool those two arms without checking they agree
+   at the ASV level, and don't stop there: check the **technical**
+   (extraction) replicates too, at the `replicate` column level, before that.
+   `PLAN.md` §7 `02_qc_filter.R` runs both checks explicitly — the ISD
+   reference scripts (`isd_archive_scripts/isd_crete_numerical_ecology.R`)
+   only ever checked the biological level, which is why this needed calling
+   out separately here.
 
 ## Reference databases
 
@@ -116,11 +147,11 @@ rows. Harmless as configured, because `vsearch_databases = ['silva']` and GG2 is
 used for naive-Bayes only (which reads the trainset, not these files). Reconcile
 before pointing VSEARCH at GG2.
 
-## Two environment traps that cost real time
+## Environment traps that cost real time
 
-Both produce silent hangs or misleading errors; both are already fixed in
-`Containerfile` / `scripts/run_pipeline.sh`, documented here so they are not
-re-introduced.
+Each produces a silent hang or a misleading error; each is already fixed
+(in `Containerfile` / `scripts/run_pipeline.sh` for #1-2, `.Rprofile` for #3,
+`scripts/nextflow.config` for #4), documented here so none is re-introduced.
 
 1. **SELinux is enforcing.** Podman bind mounts are inaccessible without a
    label option — every file under `/work` returns "Permission denied", and
@@ -144,7 +175,23 @@ upstream's `nextflow.config`, so `run_pipeline.sh` sets `NXF_SYNTAX_PARSER=v1`
 rather than patching a checkout we do not own. Drop it once upstream quotes
 that as `env('HOME')`.
 
-3. **`conf/base.config`'s `highparallel` label caps `time` at 8h.** The four
+3. **`renv`'s autoloader crashes every plain `Rscript` invocation.** `.Rprofile`
+   sources `renv/activate.R`, which tries to bootstrap `BiocManager` into
+   `~/.cache/R/renv` (renv's default cache root) to resolve the lockfile's
+   Bioconductor entries — and that install fails outright in this image,
+   halting before any script code runs (`Error: failed to install
+   "BiocManager"`). A `.renv-cache/` with real cached packages sits at the
+   project root, but that's not the path renv actually resolves to, and the
+   project-local `renv/library/` only ever held `renv` itself — the 357
+   packages in `renv.lock` were never installed *through* renv's private
+   library; they're the system R library (`/usr/lib64/R/library`), confirmed
+   version-for-version identical to the lockfile. So `renv.lock` here is a
+   manifest, not a live dependency source. Fixed by setting
+   `Sys.setenv(RENV_CONFIG_AUTOLOADER_ENABLED = "FALSE")` at the top of
+   `.Rprofile`, before it sources `activate.R` — every script still gets
+   exactly the same packages, just without the broken bootstrap attempt.
+
+4. **`conf/base.config`'s `highparallel` label caps `time` at 8h.** The four
    deep sediment libraries (below) all exceed that. Hitting the limit doesn't
    fail the task cleanly — Nextflow's local-executor timeout-kill path races
    with its own exit-status check (`java.lang.IllegalThreadStateException:
@@ -230,6 +277,70 @@ Beyond that:
   build products of `build_inputs.R`; edit the script, not the outputs.
 - Reference databases live at `/mnt/data/databases` on the host and are mounted
   at `/databases` in the container. Override with `DB_DIR=... scripts/run_pipeline.sh`.
+
+## Downstream analysis notes
+
+Statistical choices made while implementing `PLAN.md` §7, and why. Read
+before changing any of these -- each was picked for a reason specific to
+this dataset, not a generic default.
+
+- **Rarefaction depth (499) comes from the upstream pipeline's own
+  `results/hifi/final/rarefaction_depth_suggested.txt`**, not a re-derived
+  quantile — reused rather than duplicated. Its sibling
+  `alpha_depth_suggested.txt` (116877) is a much higher *saturation* depth
+  (how deep the curve needs to go to plateau), not a depth to rarefy to;
+  using it would drop all but a handful of the highest-biomass libraries.
+  15/51 samples fall below 499 reads and are excluded from the rarefied
+  matrix only (`03_normalize.R`) — still present in relative-abundance/CLR.
+
+- **CLR needs its own, coarser ASV filter.** The general QC prevalence
+  filter (`02_qc_filter.R`, ≥2 samples) leaves 15,460 ASVs — far too sparse
+  for compositional zero-replacement: `zCompositions::cmultRepl()`'s default
+  thresholds (`z.warning`/`z.delete` = 0.8/`TRUE`) **silently dropped 33/51
+  samples** the first time this ran, because most ASVs are zero in >80% of
+  samples at that resolution. Fixed in `03_normalize.R` with a CLR-specific
+  ≥10%-of-samples prevalence filter (717 ASVs) plus `z.delete = FALSE`
+  explicitly, so a still-sparse sample (the low-diversity mocks, by design;
+  the shallowest sediment libraries) gets a warning, never a silent drop.
+  Check `setequal(rownames(counts_clr), rownames(counts_clean))` after any
+  change here — it should always be `TRUE`.
+
+- **`conductivity_ms` is too sparse (19.6% complete) to be a primary
+  predictor.** Including it in `07_environmental_drivers.R`'s db-RDA drops
+  casewise-complete N from 34/46 to 10/46, and at N=10 forward selection
+  correctly retains no term (`RsquareAdj()` returns `numeric(0)` — guarded
+  for explicitly, since `sprintf("%.3f", numeric(0))` silently produces an
+  empty string instead of erroring). The primary model uses `depth_m` +
+  `temperature_c` (N=34); conductivity gets a clearly-labeled secondary,
+  reduced-N sensitivity run alongside it, not silently dropped.
+
+- **`elevation_m` is `depth_m`'s exact complement** (`depth_m + elevation_m
+  = 1535` constant, confirmed numerically, cor = -1) — excluded from every
+  model, not just deprioritized in VIF, to avoid perfect collinearity.
+
+- **`vegan::plot.varpart()` clips long `Xnames`** (`"depth_m"`,
+  `"temperature_c"` both ran off the device edge at default margins) —
+  shortened to `"depth"`/`"temp"` for the plot only; full names stay in
+  `results/07_varpart.tsv`. It also doesn't compose with a ggplot in the
+  same device (base `layout()`/`print(<ggplot>)` leave it blank, and
+  `grid::grid.grabExpr()` came back blank too on this specific plot) —
+  `10_figures.R`'s Fig 3 embeds the already-rendered `plots/07_varpart.png`
+  as a raster (`png::readPNG` + `grid::rasterGrob`) instead of recapturing it.
+
+- **ALDEx2 and Maaslin2 substantially disagree** on sediment-vs-water
+  differential abundance (q<0.05): ALDEx2 finds 0 of 15,460 ASVs
+  significant, Maaslin2 finds 29, intersection 0. This is a real result, not
+  a bug — ALDEx2's Monte-Carlo compositional-uncertainty approach is
+  markedly more conservative, and N is unbalanced (36 sediment vs. 10
+  water). Report both numbers; don't quietly pick the one with hits.
+
+- **Replicate concordance found real disagreement, not just noise:** 14/18
+  biological-replicate pairs (`sample_set` transect vs. isolate_source, same
+  site + tech_rep) are discordant by the `02_qc_filter.R` criterion, vs. only
+  4/23 technical (extraction) pairs. The two `sample_set` arms are not
+  interchangeable at this site — treat that as a finding to report, not
+  a QC problem to pool away. See `results/replicate_concordance_decision.tsv`
+  (both replicate levels are **not pooled by default**) and `PLAN.md` §11.7.
 
 ## Layout
 
