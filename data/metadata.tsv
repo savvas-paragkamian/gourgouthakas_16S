@@ -48,5 +48,5 @@ W3_1_A	W3	1	Kinnex16S_Fwd_03--Kinnex16S_Rev_27	water	transect		763	772	7.6	188.5
 W3_2_A	W3	2	Kinnex16S_Fwd_03--Kinnex16S_Rev_28	water	transect		763	772	7.6	188.5	35.33213	24.08346	2022-08-09	Freshwater sample at Marcel waterfall
 W4_1_A	W4	1	Kinnex16S_Fwd_04--Kinnex16S_Rev_21	water	transect		903	632	7.9	188.5	35.33213	24.08346	2022-08-09	Freshwater sample at -903 under water curtain
 W4_2_A	W4	2	Kinnex16S_Fwd_04--Kinnex16S_Rev_22	water	transect		903	632	7.9	188.5	35.33213	24.08346	2022-08-09	Freshwater sample at -903 under water curtain
-W5_1_A	W5	1	Kinnex16S_Fwd_04--Kinnex16S_Rev_23	water	transect		1100	435	195.9	8.4	35.33213	24.08346	2022-08-09	Freshwater sample at the last syphon at -1100 m depth
-W5_2_A	W5	2	Kinnex16S_Fwd_04--Kinnex16S_Rev_24	water	transect		1100	435	195.9	8.4	35.33213	24.08346	2022-08-09	Freshwater sample at the last syphon at -1100 m depth
+W5_1_A	W5	1	Kinnex16S_Fwd_04--Kinnex16S_Rev_23	water	transect		1100	435	8.4	195.9	35.33213	24.08346	2022-08-09	Freshwater sample at the last syphon at -1100 m depth
+W5_2_A	W5	2	Kinnex16S_Fwd_04--Kinnex16S_Rev_24	water	transect		1100	435	8.4	195.9	35.33213	24.08346	2022-08-09	Freshwater sample at the last syphon at -1100 m depth
