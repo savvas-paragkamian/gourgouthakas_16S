@@ -7,6 +7,27 @@ counts <- readRDS(file.path(path_processed, "counts.rds"))
 taxonomy <- readRDS(file.path(path_processed, "taxonomy.rds"))
 metadata <- readRDS(file.path(path_processed, "metadata.rds"))
 
+# --- 0. known data-quality issue: W5's conductivity/temperature are
+# transposed in the source sheet (AGENTS.md) -- handled explicitly HERE,
+# not silently upstream in 01_import.R, and reported. Left uncorrected, it
+# doesn't just look wrong (temperature_c = 195.9 degC), it actively corrupts
+# every downstream use of these two columns: conductivity_ms is *only*
+# measured for water (its 19.6% completeness = exactly the 10 water rows),
+# so W5's swapped pair is 2 of the only 10 complete-case observations 07's
+# correlation/VIF/db-RDA/envfit/varpart/Mantel analyses have to work with --
+# confirmed this was forcing temperature_c~conductivity_ms to read a
+# mechanically-exact -1.00 correlation before this fix, not a real one.
+w5_rows <- metadata$site == "W5" & !is.na(metadata$temperature_c) & metadata$temperature_c > 100
+if (any(w5_rows)) {
+  message(sprintf(
+    "[02_qc_filter] correcting W5's transposed conductivity_ms/temperature_c for %d sample(s): %s",
+    sum(w5_rows), paste(metadata$sample_id[w5_rows], collapse = ", ")
+  ))
+  tmp <- metadata$temperature_c[w5_rows]
+  metadata$temperature_c[w5_rows] <- metadata$conductivity_ms[w5_rows]
+  metadata$conductivity_ms[w5_rows] <- tmp
+}
+
 n_asv_start <- ncol(counts)
 n_reads_start <- sum(counts)
 

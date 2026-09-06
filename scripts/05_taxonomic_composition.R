@@ -124,7 +124,31 @@ p_core <- ggplot2::ggplot(core_genus, ggplot2::aes(
                 title = sprintf("Core genera (>=80%% prevalence, >=0.1%% mean abundance) by sample type"))
 save_plot(p_core, "05_core_genera", w = 7, h = max(4, 0.25 * dplyr::n_distinct(core_genus$genus)))
 
+# Separate per-sample_type plots too: sediment (36 samples, huge depth range,
+# only 1 genus clears 80% prevalence) and water (10 samples, far more
+# homogeneous, 17 genera clear it) are so lopsided that one shared-scale
+# plot badly serves whichever group has fewer bars -- each gets its own
+# plot, scaled to its own genera and abundance range.
+for (st in unique(core_genus$sample_type)) {
+  core_st <- core_genus |> dplyr::filter(sample_type == st)
+  write_result(core_st, sprintf("05_core_genera_%s", st))
+  if (nrow(core_st) == 0) {
+    message(sprintf("[05_taxonomic_composition] no core genera for sample_type = %s at these thresholds -- no plot written", st))
+    next
+  }
+  p_core_st <- ggplot2::ggplot(core_st, ggplot2::aes(
+    x = forcats::fct_reorder(genus, mean_rel_abund), y = mean_rel_abund
+  )) +
+    ggplot2::geom_col(fill = palette_sample_type()[[st]]) +
+    ggplot2::coord_flip() +
+    ggplot2::labs(x = NULL, y = "Mean relative abundance",
+                  title = sprintf("Core genera: %s (>=80%% prevalence, >=0.1%% mean abundance, N=%d)",
+                                   st, sum(metadata$sample_type == st)))
+  save_plot(p_core_st, sprintf("05_core_genera_%s", st), w = 7, h = max(3, 0.3 * nrow(core_st)))
+}
+
 message(sprintf(
-  "[05_taxonomic_composition] %d phyla, %d genera aggregated; %d core genera identified",
-  dplyr::n_distinct(phylum_long$phylum), dplyr::n_distinct(genus_long$genus), nrow(core_genus)
+  "[05_taxonomic_composition] %d phyla, %d genera aggregated; %d core genera identified (%s)",
+  dplyr::n_distinct(phylum_long$phylum), dplyr::n_distinct(genus_long$genus), nrow(core_genus),
+  paste(sprintf("%s=%d", names(table(core_genus$sample_type)), table(core_genus$sample_type)), collapse = ", ")
 ))
