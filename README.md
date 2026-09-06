@@ -78,6 +78,6 @@ HiFi-16S-workflow/     upstream pipeline — separate repo, do not edit
 results/ plots/        outputs
 ```
 
-See `CLAUDE.md` for dataset specifics, the departures from `PLAN.md`
+See `AGENTS.md` for dataset specifics, the departures from `PLAN.md`
 (no phylogeny; depth, not geography, is the gradient), and the environment
 traps already worked around (SELinux, wget2/IPv6).
