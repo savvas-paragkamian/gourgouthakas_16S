@@ -45,15 +45,16 @@ metadata <- metadata_raw |>
   dplyr::relocate(sample_id, site, location, bio_rep, tech_rep, sample_type,
                    sample_set, condition)
 
-# Known data-quality issue (AGENTS.md "Known data-quality issue"): W5's
-# conductivity/temperature are transposed in the source sheet. Carried through
-# verbatim here, exactly as build_inputs.R already does — flagged, not fixed,
-# and handled explicitly downstream in 02_qc_filter.R, not silently here.
-w5_bad <- metadata$sample_id[metadata$site == "W5" & metadata$temperature_c > 100]
-if (length(w5_bad) > 0) {
-  message(sprintf(
-    "[01_import] %d W5 sample(s) carry the known transposed conductivity/temperature values verbatim (see AGENTS.md): %s",
-    length(w5_bad), paste(w5_bad, collapse = ", ")
+# W5's conductivity_ms/temperature_c used to be transposed in data/
+# metadata.tsv (195.9 degC, impossible in a cave stream) -- fixed at the
+# source now, not handled here. This is a standing guard against a future
+# data refresh reintroducing it silently, not the fix itself.
+temp_bad <- metadata$sample_id[!is.na(metadata$temperature_c) & metadata$sample_type == "water" &
+                                  (metadata$temperature_c < 0 | metadata$temperature_c > 40)]
+if (length(temp_bad) > 0) {
+  stop(sprintf(
+    "[01_import] Implausible temperature_c for water sample(s) %s -- looks transposed with conductivity_ms again (see AGENTS.md 'Known data-quality issue'). Fix data/metadata.tsv (or its source sheet), don't carry it through.",
+    paste(temp_bad, collapse = ", ")
   ))
 }
 

@@ -252,12 +252,31 @@ detail is in `results/hifi/nb_tax/` and `results/hifi/vsearch_tax/`.
 
 ## Known data-quality issue
 
-**W5's conductivity and temperature are transposed in the source sheet**:
-`conductivity_ms = 8.4`, `temperature_c = 195.9`. 195.9 °C is impossible in a
-cave stream, and every other water sample sits near 188 mS/cm and 6.6–7.9 °C.
-`build_inputs.R` carries the values through **verbatim** rather than silently
-correcting them. Handle it explicitly in `02_qc_filter.R` and say so in the
-output; do not quietly swap them upstream.
+**FIXED: W5's conductivity and temperature were transposed** in
+`data/metadata.tsv` — `conductivity_ms = 8.4`, `temperature_c = 195.9`,
+impossible in a cave stream (every other water sample sits near 178–188
+mS/cm and 6.6–7.9 °C). Corrected directly in `data/metadata.tsv`
+(`temperature_c = 8.4`, `conductivity_ms = 195.9` — matches the depth trend:
+6.6 → 7.3 → 7.6 → 7.9 → 8.4 °C across W1–W5. Note: the source MIxS sheet's
+own value is `196.9`, not `195.9` — a ~1 mS/cm rounding-level discrepancy
+from a hand edit rather than a `build_inputs.R` regeneration; immaterial to
+any result, but regenerate via `build_inputs.R` rather than hand-editing
+again if exactness matters).
+
+Left uncorrected, this wasn't just a cosmetic problem: `conductivity_ms` is
+**only measured for water**, so W5's swapped pair was 2 of the only 10
+complete-case observations `07_environmental_drivers.R`'s correlation/VIF/
+db-RDA/envfit/varpart/Mantel analyses had to work with — it was forcing a
+mechanically-exact **-1.00** temperature~conductivity correlation that
+wasn't real, and roughly halved the db-RDA R² (0.076 → 0.143 once fixed).
+Caught by auditing `07_env_correlation.png` for exactly this kind of
+suspicious exact value, the same way the elevation_m/depth_m -1.00 was
+legitimate but this one wasn't.
+
+`build_inputs.R` now asserts water `temperature_c` is in a plausible 0–40 °C
+range and refuses to write `metadata.tsv` otherwise; `01_import.R` carries
+the same guard for whatever `metadata.tsv` is actually on disk. Neither
+script silently "fixes" a transposition if one recurs — both stop loudly.
 
 Sediment temperature is missing for C7, C8, C9 (and their `_I` counterparts) —
 genuinely absent, not a parsing failure.

@@ -90,10 +90,14 @@ sed_meta <- data.frame(
   description     = trimws(sed$sample_description)
 )
 
-# NOTE: W5's conductivity (8.4) and temperature (195.9) are transposed in the
-# source sheet — 195.9 degC is impossible in a cave stream and 8.4 mS/cm is far
-# off the ~188 of every other water sample. Carried through verbatim here and
-# flagged, rather than silently "fixed"; see AGENTS.md.
+# FIXED (was: W5's conductivity/temperature transposed -- 195.9 degC read
+# where temperature_c should be, 8.4 mS/cm where conductivity_ms should be).
+# The source sheet's `temperature`/`conductivity` columns are correctly
+# ordered for every site including W5 (verified), so this mapping — by
+# column name, not position — has always read them correctly; the error was
+# in a previously-generated data/metadata.tsv, corrected there directly. The
+# assertion below is a permanent guard against that recurring silently, not
+# a fix for a bug in this script.
 wat_meta <- data.frame(
   site            = trimws(wat$sample_alias),
   sample_type     = "water",
@@ -125,6 +129,19 @@ meta$sample_set <- ifelse(meta$sample_type == "control", "control",
                    ifelse(grepl("_I$", meta$site), "isolate_source", "transect"))
 
 meta$sample_name <- meta$biosample
+
+# Plausibility guard against a transposed temperature_c/conductivity_ms
+# slipping through again (this cave's water sits ~6-9 degC, ~170-200 mS/cm;
+# sediment temperature has no fixed range so is left unchecked). Catches the
+# shape of the W5 bug, not just that one row.
+temp_bad <- !is.na(meta$temperature_c) & meta$sample_type == "water" &
+  (meta$temperature_c < 0 | meta$temperature_c > 40)
+if (any(temp_bad)) {
+  stop(sprintf(
+    "Implausible temperature_c for water sample(s) %s -- likely transposed with conductivity_ms again; fix the source sheet, don't hand-edit the output.",
+    paste(meta$sample_name[temp_bad], collapse = ", ")
+  ))
+}
 
 meta <- meta[order(meta$sample_type, meta$depth_m, meta$site, meta$replicate), ]
 

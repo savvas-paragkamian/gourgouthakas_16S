@@ -7,26 +7,14 @@ counts <- readRDS(file.path(path_processed, "counts.rds"))
 taxonomy <- readRDS(file.path(path_processed, "taxonomy.rds"))
 metadata <- readRDS(file.path(path_processed, "metadata.rds"))
 
-# --- 0. known data-quality issue: W5's conductivity/temperature are
-# transposed in the source sheet (AGENTS.md) -- handled explicitly HERE,
-# not silently upstream in 01_import.R, and reported. Left uncorrected, it
-# doesn't just look wrong (temperature_c = 195.9 degC), it actively corrupts
-# every downstream use of these two columns: conductivity_ms is *only*
-# measured for water (its 19.6% completeness = exactly the 10 water rows),
-# so W5's swapped pair is 2 of the only 10 complete-case observations 07's
-# correlation/VIF/db-RDA/envfit/varpart/Mantel analyses have to work with --
-# confirmed this was forcing temperature_c~conductivity_ms to read a
-# mechanically-exact -1.00 correlation before this fix, not a real one.
-w5_rows <- metadata$site == "W5" & !is.na(metadata$temperature_c) & metadata$temperature_c > 100
-if (any(w5_rows)) {
-  message(sprintf(
-    "[02_qc_filter] correcting W5's transposed conductivity_ms/temperature_c for %d sample(s): %s",
-    sum(w5_rows), paste(metadata$sample_id[w5_rows], collapse = ", ")
-  ))
-  tmp <- metadata$temperature_c[w5_rows]
-  metadata$temperature_c[w5_rows] <- metadata$conductivity_ms[w5_rows]
-  metadata$conductivity_ms[w5_rows] <- tmp
-}
+# W5's conductivity_ms/temperature_c transposition (AGENTS.md "Known
+# data-quality issue") is fixed at the source (data/metadata.tsv) now -- no
+# runtime correction needed here any more. It mattered well beyond looking
+# wrong: conductivity_ms is only measured for water, so W5's swapped pair
+# used to be 2 of the only 10 complete-case observations 07's correlation/
+# VIF/db-RDA/envfit/varpart/Mantel analyses had to work with, forcing a
+# mechanically-exact -1.00 temperature~conductivity correlation that wasn't
+# real. 01_import.R now asserts this can't recur silently.
 
 n_asv_start <- ncol(counts)
 n_reads_start <- sum(counts)
@@ -109,6 +97,34 @@ write_result(
   tibble::tibble(asv_id = rownames(contam), contam) |> dplyr::filter(is_contaminant),
   "02_decontam_flagged_asvs"
 )
+
+# Standard decontam diagnostic (its own vignette's PA plot): prevalence of
+# each ASV among the negative controls vs. among every other sample, colored
+# by the contaminant call. A real contaminant should sit high on the
+# negative-control axis and/or low on the true-sample axis; anything flagged
+# that instead lands in the bottom-right (common in real samples, rare in
+# blanks) is worth a second look at the prevalence-method threshold.
+pa_neg <- colSums(counts_kept[is_neg, , drop = FALSE] > 0)
+pa_pos <- colSums(counts_kept[!is_neg, , drop = FALSE] > 0)
+decontam_pa <- tibble::tibble(
+  asv_id = colnames(counts_kept),
+  prevalence_controls = pa_neg,
+  prevalence_samples = pa_pos,
+  contaminant = is_contaminant
+)
+write_result(decontam_pa, "02_decontam_prevalence")
+
+p_decontam <- ggplot2::ggplot(decontam_pa, ggplot2::aes(
+  x = prevalence_controls, y = prevalence_samples, color = contaminant
+)) +
+  ggplot2::geom_jitter(width = 0.08, height = 0.4, alpha = 0.4, size = 1) +
+  ggplot2::scale_color_manual(values = c(`TRUE` = "#E15759", `FALSE` = "grey60")) +
+  ggplot2::scale_x_continuous(breaks = 0:sum(is_neg)) +
+  ggplot2::labs(x = "Prevalence (negative controls: ctr_EB, ctr_MM)",
+                y = "Prevalence (all other samples)", color = "Contaminant\n(decontam)",
+                title = "Decontam diagnostic: ASV prevalence, controls vs. samples",
+                subtitle = sprintf("%d/%d ASVs flagged, prevalence method", sum(is_contaminant), ncol(counts_kept)))
+save_plot(p_decontam, "02_decontam_prevalence", w = 6, h = 5)
 
 # --- 4. prevalence filter (+ optional low-count filter) --------------------
 prevalence <- colSums(counts_decontam > 0)
