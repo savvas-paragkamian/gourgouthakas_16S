@@ -93,7 +93,7 @@ sed_meta <- data.frame(
 # NOTE: W5's conductivity (8.4) and temperature (195.9) are transposed in the
 # source sheet — 195.9 degC is impossible in a cave stream and 8.4 mS/cm is far
 # off the ~188 of every other water sample. Carried through verbatim here and
-# flagged, rather than silently "fixed"; see CLAUDE.md.
+# flagged, rather than silently "fixed"; see AGENTS.md.
 wat_meta <- data.frame(
   site            = trimws(wat$sample_alias),
   sample_type     = "water",

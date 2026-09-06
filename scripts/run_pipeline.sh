@@ -25,7 +25,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE="${IMAGE:-localhost/gourgouthakas-16s:latest}"
-DB_DIR="${DB_DIR:-/mnt/data/databases}"
+DB_DIR="${DB_DIR:-$ROOT/work/databases}"
 ACTION="${1:-run}"
 
 # Are we already inside a container? If so this script must NOT call podman —
