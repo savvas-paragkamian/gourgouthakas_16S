@@ -149,13 +149,14 @@ RUN printf 'prefer-family = IPv4\ntries = 5\ntimeout = 60\n' \
 # ---------------------------------------------------------------------------
 ARG NEXTFLOW_VERSION=26.04.6
 ENV NXF_HOME=/opt/nextflow
+
 RUN set -eux; \
     mkdir -p /opt/nextflow; \
     curl -s https://get.nextflow.io | NXF_VER=${NEXTFLOW_VERSION} bash; \
     mv nextflow /usr/local/bin/nextflow; \
-    chmod +x /usr/local/bin/nextflow; \
-    nextflow -version; \
-    chmod -R a+rwX /opt/nextflow
+    #chmod +x /usr/local/bin/nextflow; \
+    nextflow -version; #\
+    #chmod -R a+rwX /opt/nextflow
 
 WORKDIR /work
 CMD ["/bin/bash"]
