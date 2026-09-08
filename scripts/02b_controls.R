@@ -345,28 +345,50 @@ stopifnot("control row(s) survived to counts_clean/metadata_clean" = !any(metada
 # ============================================================================
 rel_ab <- counts_filtered / rowSums(counts_filtered)
 
+# One row per pair of samples (not built separately for within vs. between --
+# a single table, filtered two ways, is easier to follow and to check).
+# "Within" = the two samples share `pair_key` (the replicate-pair identifier
+# -- `site` for technical, `location`+`tech_rep` for biological). "Between"
+# is the reference/noise-floor distribution a within-pair distance gets
+# judged against, restricted to pairs of the SAME sample_type: a
+# sediment-vs-water pair is trivially, definitionally dissimilar and says
+# nothing about whether a same-type replicate pair reproduced, so it doesn't
+# belong in that reference distribution.
 concordance_at <- function(rel_ab, counts, metadata, pair_key, level_label) {
   bray_d <- as.matrix(vegan::vegdist(rel_ab, method = "bray"))
   jac_d <- as.matrix(vegan::vegdist(counts > 0, method = "jaccard"))
-  ids <- rownames(rel_ab)
-  meta_i <- metadata[match(ids, metadata$sample_id), ]
   richness <- rowSums(counts > 0)
   libsize <- rowSums(counts)
-  groups <- split(ids, meta_i[[pair_key]])
-  groups <- groups[lengths(groups) == 2L]
-  pair_rows <- lapply(names(groups), function(g) {
-    a <- groups[[g]][1]; b <- groups[[g]][2]
-    tibble::tibble(level = level_label, pair_id = g, sample_a = a, sample_b = b,
-                   bray = bray_d[a, b], jaccard = jac_d[a, b],
-                   spearman_cor = suppressWarnings(stats::cor(rel_ab[a, ], rel_ab[b, ], method = "spearman")),
-                   delta_richness = richness[a] - richness[b], delta_library_size = libsize[a] - libsize[b])
-  })
-  within_pair <- dplyr::bind_rows(pair_rows)
-  all_pairs <- t(utils::combn(ids, 2))
-  within_pair_set <- paste(within_pair$sample_a, within_pair$sample_b)
-  is_within <- paste(all_pairs[, 1], all_pairs[, 2]) %in% within_pair_set
-  between_pair <- tibble::tibble(level = level_label, sample_a = all_pairs[!is_within, 1], sample_b = all_pairs[!is_within, 2],
-                                   bray = bray_d[all_pairs[!is_within, , drop = FALSE]], jaccard = jac_d[all_pairs[!is_within, , drop = FALSE]])
+
+  ids <- rownames(rel_ab)
+  meta_i <- metadata[match(ids, metadata$sample_id), ]
+  i <- utils::combn(seq_along(ids), 2)[1, ]
+  j <- utils::combn(seq_along(ids), 2)[2, ]
+
+  pairs <- tibble::tibble(
+    sample_a = ids[i], sample_b = ids[j],
+    key_a = meta_i[[pair_key]][i], key_b = meta_i[[pair_key]][j],
+    type_a = meta_i$sample_type[i], type_b = meta_i$sample_type[j]
+  ) |>
+    dplyr::mutate(
+      level = level_label,
+      bray = bray_d[cbind(sample_a, sample_b)],
+      jaccard = jac_d[cbind(sample_a, sample_b)],
+      spearman_cor = purrr::map2_dbl(sample_a, sample_b, \(a, b) suppressWarnings(stats::cor(rel_ab[a, ], rel_ab[b, ], method = "spearman"))),
+      delta_richness = richness[sample_a] - richness[sample_b],
+      delta_library_size = libsize[sample_a] - libsize[sample_b],
+      is_within = key_a == key_b,
+      same_type = type_a == type_b
+    )
+
+  within_pair <- pairs |>
+    dplyr::filter(is_within) |>
+    dplyr::transmute(level, pair_id = key_a, sample_a, sample_b, bray, jaccard,
+                      spearman_cor, delta_richness, delta_library_size)
+  between_pair <- pairs |>
+    dplyr::filter(!is_within, same_type) |>
+    dplyr::select(level, sample_a, sample_b, bray, jaccard)
+
   list(within = within_pair, between = between_pair)
 }
 
@@ -389,8 +411,17 @@ p_concordance <- dplyr::bind_rows(
   bio_conc$within |> dplyr::mutate(pair_type = "within-pair"), bio_conc$between |> dplyr::mutate(pair_type = "between-pair")
 ) |>
   ggplot2::ggplot(ggplot2::aes(x = level, y = bray, fill = pair_type)) +
-  ggplot2::geom_boxplot(outlier.size = 0.5) +
-  ggplot2::geom_jitter(ggplot2::aes(color = pair_type), width = 0.15, alpha = 0.4, size = 0.8) +
+  # geom_boxplot dodges its two pair_type boxes apart per level (default
+  # position_dodge2); geom_jitter doesn't know about that grouping on its
+  # own and was jittering around the plain, un-dodged x position, scattering
+  # points across both boxes instead of onto their own. position_dodge2 and
+  # position_jitterdodge don't share the same width semantics, so both
+  # layers are pinned to an explicit, identical position_dodge(width=0.75)
+  # (jitterdodge's own jitter is layered on top via jitter.width/height).
+  ggplot2::geom_boxplot(outlier.size = 0.5, position = ggplot2::position_dodge(width = 0.75)) +
+  ggplot2::geom_point(ggplot2::aes(color = pair_type),
+                       position = ggplot2::position_jitterdodge(dodge.width = 0.75, jitter.width = 0.15),
+                       alpha = 0.4, size = 0.8) +
   ggplot2::labs(x = NULL, y = "Bray-Curtis distance", title = "Replicate concordance: within-pair vs. between-pair",
                 subtitle = "Lower is better -- a within-pair distance near the between-pair distribution means that replicate didn't reproduce")
 save_plot(p_concordance, "02_replicate_concordance", w = 6, h = 5)

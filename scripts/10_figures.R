@@ -27,6 +27,7 @@ p1b <- alpha |> # controls already dropped upstream in 02b_controls.R
   ggplot2::geom_point(size = 1.5, alpha = 0.7) +
   ggplot2::geom_smooth(method = "lm", formula = y ~ x, se = TRUE) +
   ggplot2::scale_color_manual(values = palette_sample_type()) +
+  ggplot2::scale_x_continuous(breaks = scales::breaks_width(200)) +
   ggplot2::labs(x = "Depth (m)", y = "Shannon diversity", color = NULL, title = "B. Alpha diversity vs. depth")
 
 fig1 <- p1a + p1b + patchwork::plot_layout(guides = "collect")

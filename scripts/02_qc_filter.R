@@ -52,19 +52,67 @@ lib_sizes <- tibble::tibble(
   library_size = rowSums(counts_kept)
 ) |>
   dplyr::left_join(metadata, by = "sample_id") |>
-  dplyr::arrange(library_size)
+  dplyr::arrange(depth_m) # controls (no depth_m) sort last, dplyr's default NA handling
 
-p_libsize <- ggplot2::ggplot(lib_sizes, ggplot2::aes(
-  x = forcats::fct_reorder(sample_id, library_size), y = library_size, fill = sample_type
-)) +
+# Slide-ready version: 16:9, higher dpi, larger text throughout -- x axis
+# ordered by depth_m (controls, with no depth concept, sort last) but
+# labeled with sample_id, faceted into control/sediment/water panels
+# (space="free_x" so each panel width matches its own sample count -- 5
+# controls shouldn't get the same width as 36 sediment samples), y axis in
+# plain read counts (not "1e+05") at every power of ten for a fast
+# order-of-magnitude read. sample_id_f is a single shared factor (levels
+# fixed once, in depth order) so the bracket panel below lines up exactly.
+lib_sizes$sample_id_f <- forcats::fct_inorder(lib_sizes$sample_id)
+
+p_libsize <- ggplot2::ggplot(lib_sizes, ggplot2::aes(x = sample_id_f, y = library_size, fill = sample_type)) +
   ggplot2::geom_col() +
+  ggplot2::facet_grid(~sample_type, scales = "free_x", space = "free_x") +
   ggplot2::scale_fill_manual(values = palette_sample_type()) +
-  ggplot2::scale_y_log10() +
-  ggplot2::coord_flip() +
-  ggplot2::labs(x = NULL, y = "Library size (log10)", fill = "Sample type",
+  ggplot2::scale_y_log10(breaks = 10^(1:6), labels = scales::label_comma()) +
+  ggplot2::labs(x = NULL, y = "Library size (reads)", fill = "Sample type",
                 title = "Library sizes after lineage filtering") +
-  ggplot2::theme(axis.text.y = ggplot2::element_text(size = 6))
-save_plot(p_libsize, "02_library_sizes", w = 7, h = 10)
+  ggplot2::theme(
+    axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5, size = 10),
+    axis.text.y = ggplot2::element_text(size = 14),
+    axis.title = ggplot2::element_text(size = 18),
+    plot.title = ggplot2::element_text(size = 22),
+    strip.text = ggplot2::element_text(size = 16, face = "bold"),
+    legend.text = ggplot2::element_text(size = 14),
+    legend.title = ggplot2::element_text(size = 16)
+  )
+
+# Depth brackets below the x axis: one bracket per group of samples sharing
+# the same depth_m (typically a site's two tech-rep extractions), spanning
+# that group's bars with end-ticks and a centered depth label. Controls have
+# no depth_m and get no bracket. Built from the full sample set via
+# geom_blank() first (invisible, one row per sample) so every panel gets the
+# same x domain -- and so the same per-facet width -- as p_libsize above;
+# the visible brackets are a second, depth-only layer on top.
+depth_groups <- lib_sizes |>
+  dplyr::filter(!is.na(depth_m)) |>
+  dplyr::group_by(sample_type, depth_m) |>
+  dplyr::summarise(
+    x_start = dplyr::first(sample_id_f),
+    x_end = dplyr::last(sample_id_f),
+    x_mid = sample_id_f[ceiling(dplyr::n() / 2)],
+    label = sprintf("%g m", dplyr::first(depth_m)),
+    .groups = "drop"
+  )
+
+p_depth_brackets <- ggplot2::ggplot(lib_sizes, ggplot2::aes(x = sample_id_f, y = 1)) +
+  ggplot2::geom_blank() +
+  ggplot2::geom_segment(data = depth_groups, ggplot2::aes(x = x_start, xend = x_end, y = 1, yend = 1), inherit.aes = FALSE) +
+  ggplot2::geom_segment(data = depth_groups, ggplot2::aes(x = x_start, xend = x_start, y = 1, yend = 0.55), inherit.aes = FALSE) +
+  ggplot2::geom_segment(data = depth_groups, ggplot2::aes(x = x_end, xend = x_end, y = 1, yend = 0.55), inherit.aes = FALSE) +
+  ggplot2::geom_text(data = depth_groups, ggplot2::aes(x = x_mid, y = 0.45, label = label),
+                      inherit.aes = FALSE, size = 3.2, angle = 90, hjust = 1) +
+  ggplot2::facet_grid(~sample_type, scales = "free_x", space = "free_x") +
+  ggplot2::scale_y_continuous(limits = c(-1.3, 1.3)) +
+  ggplot2::theme_void() +
+  ggplot2::theme(strip.text = ggplot2::element_blank())
+
+p_libsize_full <- p_libsize / p_depth_brackets + patchwork::plot_layout(heights = c(6, 1.8))
+save_plot(p_libsize_full, "02_library_sizes", w = 13.333, h = 9.5, dpi = 400)
 
 # Controls (blanks especially) are *expected* to be shallow -- don't flag
 # those on the same footing as a failed biological library. Floor is

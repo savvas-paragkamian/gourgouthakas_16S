@@ -478,13 +478,20 @@ this dataset, not a generic default.
   under-matching in mind — it undercounts guild membership, particularly
   for species-unresolved ASVs and any group defined above the genus level.
 
-- **Replicate concordance found real disagreement, not just noise:** 14/18
+- **Replicate concordance found real disagreement, not just noise:** 15/18
   biological-replicate pairs (`sample_set` transect vs. isolate_source, same
-  site + tech_rep) are discordant by the `02_qc_filter.R` criterion, vs. only
-  4/23 technical (extraction) pairs. The two `sample_set` arms are not
-  interchangeable at this site — treat that as a finding to report, not
-  a QC problem to pool away. See `results/replicate_concordance_decision.tsv`
-  (both replicate levels are **not pooled by default**) and `PLAN.md` §11.7.
+  site + tech_rep) are discordant by `02b_controls.R`'s criterion (a
+  within-pair Bray distance at or above the 5th percentile of the
+  between-pair reference distribution), vs. 5/23 technical (extraction)
+  pairs. The two `sample_set` arms are not interchangeable at this site —
+  treat that as a finding to report, not a QC problem to pool away. The
+  between-pair reference is restricted to pairs of the **same
+  `sample_type`** — a sediment-vs-water comparison is trivially,
+  definitionally dissimilar and doesn't belong in the noise floor a
+  same-type replicate pair gets judged against; this matters (tightening
+  the threshold moved the counts from 3/23 and 14/18 to 5/23 and 15/18 when
+  corrected). See `results/replicate_concordance_decision.tsv` (both
+  replicate levels are **not pooled by default**) and `PLAN.md` §11.7.
 
 ## Layout
 
