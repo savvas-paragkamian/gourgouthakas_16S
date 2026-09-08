@@ -21,7 +21,7 @@ required_pkgs <- c(
   # flat-file I/O (qiime-free)
   "biomformat", "Biostrings",
   # figures
-  "patchwork", "ggpubr", "ggrepel", "scales", "here", "gridExtra", "png",
+  "patchwork", "ggpubr", "ggrepel", "scales", "here", "gridExtra", "png", "pheatmap",
   # collinearity screening (§07)
   "car"
 )

@@ -383,11 +383,11 @@ concordance_at <- function(rel_ab, counts, metadata, pair_key, level_label) {
 
   within_pair <- pairs |>
     dplyr::filter(is_within) |>
-    dplyr::transmute(level, pair_id = key_a, sample_a, sample_b, bray, jaccard,
+    dplyr::transmute(level, sample_type = type_a, pair_id = key_a, sample_a, sample_b, bray, jaccard,
                       spearman_cor, delta_richness, delta_library_size)
   between_pair <- pairs |>
     dplyr::filter(!is_within, same_type) |>
-    dplyr::select(level, sample_a, sample_b, bray, jaccard)
+    dplyr::transmute(level, sample_type = type_a, sample_a, sample_b, bray, jaccard)
 
   list(within = within_pair, between = between_pair)
 }
@@ -399,32 +399,109 @@ bio_conc <- concordance_at(rel_ab, counts_filtered, metadata_biopair, pair_key =
 write_result(tech_conc$within, "replicate_concordance_technical")
 write_result(bio_conc$within, "replicate_concordance_biological")
 
+# Threshold is per sample_type now that between-pair is too (see
+# concordance_at() above) -- a technical pair's discordance call should be
+# judged against ITS OWN type's between-pair noise floor, not a floor
+# blended from both sediment's and water's between-distances together.
 flag_discordant <- function(within, between) {
-  thresh <- stats::quantile(between$bray, 0.05, na.rm = TRUE)
-  within |> dplyr::mutate(discordant = bray >= thresh)
+  thresh_by_type <- between |>
+    dplyr::group_by(sample_type) |>
+    dplyr::summarise(thresh = stats::quantile(bray, 0.05, na.rm = TRUE), .groups = "drop")
+  within |>
+    dplyr::left_join(thresh_by_type, by = "sample_type") |>
+    dplyr::mutate(discordant = bray >= thresh) |>
+    dplyr::select(-thresh)
 }
 tech_flagged <- flag_discordant(tech_conc$within, tech_conc$between)
 bio_flagged <- flag_discordant(bio_conc$within, bio_conc$between)
 
-p_concordance <- dplyr::bind_rows(
+# between_pair (see concordance_at() above) comes from ALL pairwise
+# comparisons under that level's key, so a (level, sample_type) combo with
+# zero real within-pairs -- e.g. "biological" x water, since water has no
+# second bio_rep arm to ever be a replicate of -- still produces between-pair
+# rows (two water samples are trivially "not a replicate pair" under a key
+# neither of them was ever eligible to share). That's a real number but not
+# a meaningful one here: there's no "did the replicate reproduce" question
+# to judge it against without a within-pair to compare it to, so it's
+# dropped from the figure via this semi_join rather than shown as an
+# orphaned box.
+valid_combos <- dplyr::bind_rows(tech_conc$within, bio_conc$within) |> dplyr::distinct(level, sample_type)
+libsize_all <- rowSums(counts_filtered)
+
+concordance_all <- dplyr::bind_rows(
   tech_conc$within |> dplyr::mutate(pair_type = "within-pair"), tech_conc$between |> dplyr::mutate(pair_type = "between-pair"),
   bio_conc$within |> dplyr::mutate(pair_type = "within-pair"), bio_conc$between |> dplyr::mutate(pair_type = "between-pair")
 ) |>
-  ggplot2::ggplot(ggplot2::aes(x = level, y = bray, fill = pair_type)) +
-  # geom_boxplot dodges its two pair_type boxes apart per level (default
-  # position_dodge2); geom_jitter doesn't know about that grouping on its
-  # own and was jittering around the plain, un-dodged x position, scattering
-  # points across both boxes instead of onto their own. position_dodge2 and
-  # position_jitterdodge don't share the same width semantics, so both
-  # layers are pinned to an explicit, identical position_dodge(width=0.75)
-  # (jitterdodge's own jitter is layered on top via jitter.width/height).
-  ggplot2::geom_boxplot(outlier.size = 0.5, position = ggplot2::position_dodge(width = 0.75)) +
-  ggplot2::geom_point(ggplot2::aes(color = pair_type),
-                       position = ggplot2::position_jitterdodge(dodge.width = 0.75, jitter.width = 0.15),
-                       alpha = 0.4, size = 0.8) +
-  ggplot2::labs(x = NULL, y = "Bray-Curtis distance", title = "Replicate concordance: within-pair vs. between-pair",
-                subtitle = "Lower is better -- a within-pair distance near the between-pair distribution means that replicate didn't reproduce")
-save_plot(p_concordance, "02_replicate_concordance", w = 6, h = 5)
+  dplyr::semi_join(valid_combos, by = c("level", "sample_type")) |>
+  # The smaller of the pair's two library sizes -- it's the bottleneck: a
+  # 24-read vs. 400,000-read "pair" is limited by the 24-read side, and this
+  # is exactly what makes many within-pair distances look artificially high
+  # (Spearman r = -0.86 between min library size and technical within-pair
+  # Bray distance -- shallow libraries are noisy, not necessarily discordant).
+  dplyr::mutate(min_lib = pmin(libsize_all[sample_a], libsize_all[sample_b]))
+
+# Shared across both panels -- same breaks/limits so a "10,000" bubble is the
+# same physical size in both, and so patchwork's guides="collect" recognizes
+# the two panels' size scales as identical and merges them into one legend
+# instead of showing two (which it does when auto-picked breaks differ).
+size_breaks <- scales::breaks_log(n = 5)(range(concordance_all$min_lib))
+size_limits <- range(concordance_all$min_lib)
+
+# One panel per sample_type (water has no "biological" x-tick -- there's no
+# second bio_rep arm for water, so bio_conc is sediment-only by construction,
+# not an oversight; the figure caption below says so explicitly).
+make_concordance_panel <- function(type_label) {
+  df <- concordance_all |> dplyr::filter(sample_type == type_label)
+  ggplot2::ggplot(df, ggplot2::aes(x = level, y = bray, fill = pair_type)) +
+    # geom_boxplot dodges its two pair_type boxes apart per level (default
+    # position_dodge2); geom_jitter doesn't know about that grouping on its
+    # own and was jittering around the plain, un-dodged x position,
+    # scattering points across both boxes instead of onto their own.
+    # position_dodge2 and position_jitterdodge don't share the same width
+    # semantics, so both layers are pinned to an explicit, identical
+    # position_dodge(width=0.75) (jitterdodge's own jitter is layered on
+    # top via jitter.width/height).
+    ggplot2::geom_boxplot(outlier.size = 0.5, position = ggplot2::position_dodge(width = 0.75)) +
+    ggplot2::geom_point(ggplot2::aes(color = pair_type, size = min_lib),
+                         position = ggplot2::position_jitterdodge(dodge.width = 0.75, jitter.width = 0.15),
+                         alpha = 0.4) +
+    ggplot2::scale_size_continuous(trans = "log10", range = c(0.5, 5), limits = size_limits, breaks = size_breaks,
+                                    labels = scales::label_comma(), name = "Library size\n(min of pair)") +
+    ggplot2::scale_y_continuous(limits = c(0, 1)) +
+    ggplot2::labs(x = NULL, y = "Bray-Curtis distance", title = type_label) +
+    ggplot2::theme(
+      axis.text = ggplot2::element_text(size = 13),
+      axis.title = ggplot2::element_text(size = 16),
+      plot.title = ggplot2::element_text(size = 18, face = "bold", hjust = 0.5),
+      legend.text = ggplot2::element_text(size = 12),
+      legend.title = ggplot2::element_text(size = 13),
+      panel.border = ggplot2::element_rect(color = "black", fill = NA, linewidth = 1)
+    )
+}
+
+# Slide-ready (16:9, high dpi, larger text), sediment | water side by side
+# with a visible border each (two separate-looking plots, not facets split
+# by a thin gridline) and one shared legend. The caption spells out exactly
+# what within-pair/between-pair mean, since "lower is better" alone assumes
+# the reader already knows what's being compared.
+p_concordance <- (make_concordance_panel("sediment") | make_concordance_panel("water")) +
+  patchwork::plot_layout(guides = "collect") +
+  patchwork::plot_annotation(
+    title = "Replicate concordance: within-pair vs. between-pair",
+    subtitle = paste(
+      "Within-pair: Bray-Curtis distance between the two samples of a genuine replicate",
+      "(technical = same site, two independent DNA extractions; biological = same location",
+      "and tech_rep number, transect vs. isolate_source arm -- sediment only, water has no",
+      "second arm). Between-pair: distance between two same-sample_type samples that are NOT",
+      "a replicate pair -- the reference/noise-floor distribution a within-pair distance is",
+      "judged against. Lower within-pair distance is better; a within-pair distance near the",
+      "between-pair distribution means that replicate didn't reproduce.",
+      sep = "\n"
+    ),
+    theme = ggplot2::theme(plot.title = ggplot2::element_text(size = 22, face = "bold"),
+                            plot.subtitle = ggplot2::element_text(size = 12))
+  )
+save_plot(p_concordance, "02_replicate_concordance", w = 13.333, h = 8.5, dpi = 400)
 
 n_discordant_tech <- sum(tech_flagged$discordant, na.rm = TRUE)
 n_discordant_bio <- sum(bio_flagged$discordant, na.rm = TRUE)
@@ -437,11 +514,13 @@ metadata_flagged <- metadata_noctrl |>
     unlist(bio_flagged |> dplyr::filter(discordant) |> dplyr::select(sample_a, sample_b))
   ))
 
-pooling_decision <- tibble::tibble(
-  level = c("technical", "biological"), n_pairs = c(nrow(tech_flagged), nrow(bio_flagged)),
-  n_discordant = c(n_discordant_tech, n_discordant_bio), pooled_by_default = c(FALSE, FALSE),
-  note = "not pooled by default -- see plots/02_replicate_concordance.png and confirm PLAN.md before changing this"
-)
+pooling_decision <- dplyr::bind_rows(tech_flagged, bio_flagged) |>
+  dplyr::group_by(level, sample_type) |>
+  dplyr::summarise(n_pairs = dplyr::n(), n_discordant = sum(discordant, na.rm = TRUE), .groups = "drop") |>
+  dplyr::mutate(
+    pooled_by_default = FALSE,
+    note = "not pooled by default -- see plots/02_replicate_concordance.png and confirm PLAN.md before changing this"
+  )
 write_result(pooling_decision, "replicate_concordance_decision")
 
 # --- save the objects 03_normalize.R onward actually read -------------------
@@ -460,3 +539,136 @@ write_result(retention, "02b_retention")
 
 message(sprintf("[02b_controls] final: %d samples x %d ASVs, %d reads (0 controls)",
                 nrow(counts_filtered), ncol(counts_filtered), sum(counts_filtered)))
+
+# ============================================================================
+# Read-tracking funnel: raw -> QC -> denoise -> taxonomy -> decontamination
+# ============================================================================
+# Samples on the y axis (with depth brackets, rotated 90 deg from
+# 02_qc_filter.R's horizontal version -- 51 samples read better as a list
+# than crammed along a shared x axis across 5 facets), faceted by pipeline
+# step. Sources:
+#   raw            = tracking$input_reads          (upstream cutadapt input)
+#   qc             = tracking$filtered_reads        (DADA2 filterAndTrim)
+#   denoise        = tracking$non_chimeric_reads     (DADA2 denoise + chimera removal --
+#                     the actual final ASV table upstream hands off)
+#   taxonomy       = rowSums(counts)                (this script's `counts` --
+#                     counts_postlineage.rds, i.e. after both the upstream
+#                     "best taxonomy" reconciliation AND 02_qc_filter.R's own
+#                     on-target lineage filter; two taxonomy-related steps
+#                     folded into one, since the user asked for 5 named
+#                     stages, not 6)
+#   decontamination = rowSums(counts_filtered)       (this script's final gate --
+#                     blacklist + bleed floor + control-drop + prevalence
+#                     filter; controls have NO row here at all, not a zero
+#                     one -- they're genuinely absent from this stage, and a
+#                     missing bar says that more honestly than a 0-length
+#                     one would, which log(0) can't render anyway)
+tracking <- readRDS(file.path(path_processed, "tracking.rds"))
+
+read_tracking <- dplyr::bind_rows(
+  tracking |> dplyr::transmute(sample_id, step = "raw", reads = input_reads),
+  tracking |> dplyr::transmute(sample_id, step = "qc", reads = filtered_reads),
+  tracking |> dplyr::transmute(sample_id, step = "denoise", reads = non_chimeric_reads),
+  tibble::tibble(sample_id = rownames(counts), step = "taxonomy", reads = rowSums(counts)),
+  tibble::tibble(sample_id = rownames(counts_filtered), step = "decontamination", reads = rowSums(counts_filtered))
+) |>
+  dplyr::mutate(step = factor(step, levels = c("raw", "qc", "denoise", "taxonomy", "decontamination"))) |>
+  dplyr::left_join(metadata |> dplyr::select(sample_id, sample_type, depth_m), by = "sample_id")
+
+# Samples ordered by sample_type then depth_m (this figure has no
+# facet_grid(~sample_type) doing that grouping for free, since the facet
+# dimension here is `step` -- ordered explicitly instead), shared across
+# every facet and the bracket panel below.
+sample_order_rt <- metadata |> dplyr::arrange(sample_type, depth_m) |> dplyr::pull(sample_id)
+read_tracking$sample_id_f <- factor(read_tracking$sample_id, levels = rev(sample_order_rt))
+metadata_rt <- metadata |> dplyr::mutate(sample_id_f = factor(sample_id, levels = rev(sample_order_rt)))
+
+p_read_tracking <- ggplot2::ggplot(read_tracking, ggplot2::aes(y = sample_id_f, x = reads, fill = sample_type)) +
+  ggplot2::geom_col() +
+  ggplot2::facet_wrap(~step, nrow = 1) +
+  ggplot2::scale_fill_manual(values = palette_sample_type()) +
+  ggplot2::scale_x_log10(breaks = 10^(1:6), labels = scales::label_comma()) +
+  ggplot2::labs(x = "Reads", y = NULL, fill = "Sample type",
+                title = "Read tracking: raw → QC → denoise → taxonomy → decontamination") +
+  ggplot2::theme(
+    axis.text.y = ggplot2::element_text(size = 7),
+    axis.text.x = ggplot2::element_text(size = 9, angle = 90, hjust = 1, vjust = 0.5),
+    axis.title = ggplot2::element_text(size = 14),
+    plot.title = ggplot2::element_text(size = 18, face = "bold"),
+    strip.text = ggplot2::element_text(size = 12, face = "bold"),
+    legend.text = ggplot2::element_text(size = 11),
+    legend.title = ggplot2::element_text(size = 12)
+  )
+
+# Depth brackets, rotated: one vertical bracket per group of samples sharing
+# a depth_m, spanning that group's rows with end-ticks and a depth label,
+# same construction as 02_qc_filter.R's horizontal version with x/y swapped.
+depth_groups_rt <- metadata_rt |>
+  dplyr::filter(!is.na(depth_m)) |>
+  dplyr::group_by(sample_type, depth_m) |>
+  dplyr::summarise(
+    y_start = dplyr::first(sample_id_f), y_end = dplyr::last(sample_id_f),
+    y_mid = sample_id_f[ceiling(dplyr::n() / 2)],
+    label = sprintf("%g", dplyr::first(depth_m)),
+    .groups = "drop"
+  )
+
+p_depth_brackets_v <- ggplot2::ggplot(metadata_rt, ggplot2::aes(y = sample_id_f, x = 1)) +
+  ggplot2::geom_blank() +
+  ggplot2::geom_segment(data = depth_groups_rt, ggplot2::aes(y = y_start, yend = y_end, x = 1, xend = 1), inherit.aes = FALSE) +
+  ggplot2::geom_segment(data = depth_groups_rt, ggplot2::aes(y = y_start, yend = y_start, x = 1, xend = 0.55), inherit.aes = FALSE) +
+  ggplot2::geom_segment(data = depth_groups_rt, ggplot2::aes(y = y_end, yend = y_end, x = 1, xend = 0.55), inherit.aes = FALSE) +
+  ggplot2::geom_text(data = depth_groups_rt, ggplot2::aes(y = y_mid, x = 0.3, label = label), inherit.aes = FALSE, size = 2.6, hjust = 1) +
+  ggplot2::scale_x_continuous(limits = c(-1.8, 1.3)) +
+  ggplot2::labs(x = "Depth\n(m)") +
+  ggplot2::theme_void() +
+  ggplot2::theme(axis.title.x = ggplot2::element_text(size = 10))
+
+# Retention-vs-raw panel: the absolute-count bars above are correct (every
+# one of 51 samples genuinely loses reads at every step, confirmed directly
+# -- min 5, max 23,258 reads dropped denoise->taxonomy alone) but a 5-20%
+# step-to-step loss is close to invisible on a log axis spanning 5 orders of
+# magnitude across samples 10,000x apart in depth. A linear 0-100%-of-raw
+# line makes that same, already-correct attrition actually visible instead
+# of looking like "these are all the same numbers."
+retention_all <- read_tracking |>
+  tidyr::pivot_wider(id_cols = sample_id, names_from = step, values_from = reads) |>
+  dplyr::left_join(metadata |> dplyr::select(sample_id, sample_type), by = "sample_id") |>
+  tidyr::pivot_longer(cols = c(raw, qc, denoise, taxonomy, decontamination), names_to = "step", values_to = "reads") |>
+  dplyr::mutate(step = factor(step, levels = c("raw", "qc", "denoise", "taxonomy", "decontamination"))) |>
+  dplyr::group_by(sample_id) |>
+  dplyr::mutate(pct_of_raw = 100 * reads / reads[step == "raw"]) |>
+  dplyr::ungroup()
+
+p_retention <- ggplot2::ggplot(retention_all, ggplot2::aes(x = step, y = pct_of_raw, group = sample_id, color = sample_type)) +
+  ggplot2::geom_line(alpha = 0.5) +
+  ggplot2::geom_point(size = 1) +
+  ggplot2::scale_color_manual(values = palette_sample_type()) +
+  ggplot2::scale_y_continuous(labels = scales::label_percent(scale = 1), limits = c(0, 100)) +
+  ggplot2::labs(x = NULL, y = "% of raw reads", color = "Sample type",
+                title = "Retention per step, relative to raw (same data as above, linear scale)") +
+  ggplot2::theme(
+    axis.text = ggplot2::element_text(size = 11),
+    axis.title = ggplot2::element_text(size = 13),
+    plot.title = ggplot2::element_text(size = 15, face = "bold"),
+    legend.position = "none" # already shown in the panel above
+  )
+
+p_read_tracking_full <- (p_depth_brackets_v | p_read_tracking) / p_retention +
+  patchwork::plot_layout(heights = c(3, 1))
+save_plot(p_read_tracking_full, "02b_read_tracking", w = 22, h = 14, dpi = 350)
+
+# Joined by sample_id, not paired positionally -- the raw/qc/denoise blocks
+# above are in tracking.rds's own row order, taxonomy in rownames(counts)'s,
+# decontamination in rownames(counts_filtered)'s, three different orderings
+# that a plain positional divide would silently mismatch.
+retention_pct <- read_tracking |>
+  dplyr::filter(step %in% c("raw", "decontamination")) |>
+  tidyr::pivot_wider(id_cols = sample_id, names_from = step, values_from = reads) |>
+  dplyr::filter(!is.na(decontamination)) |> # controls: no decontamination row at all
+  dplyr::mutate(pct = 100 * decontamination / raw)
+
+message(sprintf(
+  "[02b_controls] read tracking: mean retention raw->decontamination (real samples only) = %.1f%%",
+  mean(retention_pct$pct)
+))

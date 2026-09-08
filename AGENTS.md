@@ -381,12 +381,33 @@ this dataset, not a generic default.
   field recorded anywhere in `data/` to stratify on, a limitation, not an
   oversight. n=2 negatives is thin statistical power at *any* threshold;
   its output (`results/02b_contaminant_candidates.tsv`) is a **manual-review
-  candidate list, not automated removal** — a `decision` column, empty on
-  first run, that a human fills in and the script round-trips on every
-  subsequent run into `results/02b_contaminant_blacklist.tsv`. **Do not read
-  an empty blacklist as a clean bill of health**: `ctr_EB` (41 raw reads)
-  and `ctr_MM` (70 raw reads) are shallow negatives, so contamination
-  screening here is limited by control read depth, not exhaustive.
+  candidate list, not automated removal** — a `decision` column that a human
+  fills in and the script round-trips on every subsequent run into
+  `results/02b_contaminant_blacklist.tsv`. **Do not read an empty blacklist
+  as a clean bill of health**: `ctr_EB` (41 raw reads) and `ctr_MM` (70 raw
+  reads) are shallow negatives, so contamination screening here is limited
+  by control read depth, not exhaustive.
+
+  **Reviewed** (all 72 candidates; `results/02b_contaminant_candidates.tsv`
+  and `_blacklist.tsv`): cross-referenced against `data/mock_expected.tsv`
+  first — 40/72 hit a Zymo/ATCC mock genus, confirming most of this list is
+  PacBio barcode bleed from the mock wells into `ctr_EB`/`ctr_MM`, not a
+  reagent contaminant reaching real samples. Decision rule, applied
+  uniformly rather than judged organism-by-organism (not confident enough
+  in every genus's soil/cave ecology to override the data): **remove** if
+  absent from every real sample (`prevalence_real_samples == 0`, 32/72) or
+  present at only trace level (`max_relabund_real_samples < 0.001`, 4 more
+  — Staphylococcus 0.014%, Parafrigoribacterium 0.04%, Lactobacillus
+  0.002%, Enterenecus 0.09%), **1** other trace-level mock-genus row also
+  removed for the same reason; **keep** everything else (25/72) — the
+  observed multi-sample real abundance outweighs a statistically thin n=2
+  test. This explicitly keeps `Akkermansia` (33/46 real samples, up to 24%
+  relative abundance — the organism this whole controls investigation
+  started from) and `Parabacteroides` (21/46, up to 17%): both flagged by
+  decontam on blank-prevalence pattern alone, both overwhelmingly real by
+  direct observation. 47 ASVs blacklisted; final gate removed
+  15457→15455/30430 ASVs (most of the 47 were already going to fail the
+  ≥2-sample prevalence filter regardless, being absent from real samples).
 
 - **Bidirectional bleed floor (T5) came back at 0.00000 (0%)** — no
   mock-exclusive ASV was detected in any real sample, and no cave/water-
@@ -478,19 +499,30 @@ this dataset, not a generic default.
   under-matching in mind — it undercounts guild membership, particularly
   for species-unresolved ASVs and any group defined above the genus level.
 
-- **Replicate concordance found real disagreement, not just noise:** 15/18
+- **Replicate concordance found real disagreement, not just noise:** 16/18
   biological-replicate pairs (`sample_set` transect vs. isolate_source, same
-  site + tech_rep) are discordant by `02b_controls.R`'s criterion (a
-  within-pair Bray distance at or above the 5th percentile of the
-  between-pair reference distribution), vs. 5/23 technical (extraction)
-  pairs. The two `sample_set` arms are not interchangeable at this site —
-  treat that as a finding to report, not a QC problem to pool away. The
-  between-pair reference is restricted to pairs of the **same
-  `sample_type`** — a sediment-vs-water comparison is trivially,
-  definitionally dissimilar and doesn't belong in the noise floor a
-  same-type replicate pair gets judged against; this matters (tightening
-  the threshold moved the counts from 3/23 and 14/18 to 5/23 and 15/18 when
-  corrected). See `results/replicate_concordance_decision.tsv` (both
+  site + tech_rep — sediment only, water has no second `sample_set` arm)
+  are discordant by `02b_controls.R`'s criterion (a within-pair Bray
+  distance at or above the 5th percentile of the between-pair reference
+  distribution), vs. 5/23 technical (extraction) pairs. The two
+  `sample_set` arms are not interchangeable at this site — treat that as a
+  finding to report, not a QC problem to pool away. The between-pair
+  reference is restricted to pairs of the **same `sample_type`** (a
+  sediment-vs-water comparison is trivially, definitionally dissimilar and
+  doesn't belong in the noise floor a same-type replicate pair gets judged
+  against) **and the discordance threshold itself is computed per
+  `sample_type`**, not pooled across sediment+water — both refinements
+  moved the counts from an original 3/23 and 14/18, to 5/23 and 15/18 with
+  same-type-only between-pairs, to the current 5/23 and 16/18 once the
+  threshold was also split by type.
+  `plots/02_replicate_concordance.png` is two side-by-side panels
+  (sediment | water, patchwork, not `facet_wrap`) with an explicit
+  within-pair/between-pair definition in the caption; water's panel
+  correctly has no "biological" x-tick at all (water was never eligible
+  for biological pairing, so there's no within-pair to judge a between-pair
+  distribution against there — an earlier version of this figure showed an
+  orphaned between-only "biological" box for water, which was wrong, not
+  just unlabeled). See `results/replicate_concordance_decision.tsv` (both
   replicate levels are **not pooled by default**) and `PLAN.md` §11.7.
 
 ## Layout

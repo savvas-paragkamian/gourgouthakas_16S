@@ -88,6 +88,10 @@ p_libsize <- ggplot2::ggplot(lib_sizes, ggplot2::aes(x = sample_id_f, y = librar
 # geom_blank() first (invisible, one row per sample) so every panel gets the
 # same x domain -- and so the same per-facet width -- as p_libsize above;
 # the visible brackets are a second, depth-only layer on top.
+# Label text is horizontal (not rotated) and just the number -- "Depth (m)"
+# is said once, as the panel's own axis title, instead of repeated " m"
+# suffixes on every bracket -- to keep the whole figure at true 16:9 (a
+# rotated label needs much more vertical room than a horizontal one).
 depth_groups <- lib_sizes |>
   dplyr::filter(!is.na(depth_m)) |>
   dplyr::group_by(sample_type, depth_m) |>
@@ -95,7 +99,7 @@ depth_groups <- lib_sizes |>
     x_start = dplyr::first(sample_id_f),
     x_end = dplyr::last(sample_id_f),
     x_mid = sample_id_f[ceiling(dplyr::n() / 2)],
-    label = sprintf("%g m", dplyr::first(depth_m)),
+    label = sprintf("%g", dplyr::first(depth_m)),
     .groups = "drop"
   )
 
@@ -104,15 +108,94 @@ p_depth_brackets <- ggplot2::ggplot(lib_sizes, ggplot2::aes(x = sample_id_f, y =
   ggplot2::geom_segment(data = depth_groups, ggplot2::aes(x = x_start, xend = x_end, y = 1, yend = 1), inherit.aes = FALSE) +
   ggplot2::geom_segment(data = depth_groups, ggplot2::aes(x = x_start, xend = x_start, y = 1, yend = 0.55), inherit.aes = FALSE) +
   ggplot2::geom_segment(data = depth_groups, ggplot2::aes(x = x_end, xend = x_end, y = 1, yend = 0.55), inherit.aes = FALSE) +
-  ggplot2::geom_text(data = depth_groups, ggplot2::aes(x = x_mid, y = 0.45, label = label),
-                      inherit.aes = FALSE, size = 3.2, angle = 90, hjust = 1) +
+  ggplot2::geom_text(data = depth_groups, ggplot2::aes(x = x_mid, y = 0.3, label = label),
+                      inherit.aes = FALSE, size = 3) +
   ggplot2::facet_grid(~sample_type, scales = "free_x", space = "free_x") +
-  ggplot2::scale_y_continuous(limits = c(-1.3, 1.3)) +
+  ggplot2::labs(y = "Depth (m)") +
+  ggplot2::scale_y_continuous(limits = c(-0.1, 1.3)) +
   ggplot2::theme_void() +
-  ggplot2::theme(strip.text = ggplot2::element_blank())
+  ggplot2::theme(
+    strip.text = ggplot2::element_blank(),
+    axis.title.y = ggplot2::element_text(size = 12, angle = 90, margin = ggplot2::margin(r = 5))
+  )
 
-p_libsize_full <- p_libsize / p_depth_brackets + patchwork::plot_layout(heights = c(6, 1.8))
-save_plot(p_libsize_full, "02_library_sizes", w = 13.333, h = 9.5, dpi = 400)
+p_libsize_full <- p_libsize / p_depth_brackets + patchwork::plot_layout(heights = c(6, 1))
+save_plot(p_libsize_full, "02_library_sizes", w = 13.333, h = 7.5, dpi = 400)
+
+# --- same plot, but stacked by taxonomic classification depth --------------
+# Not composition (which taxon), but resolution: for each sample, how many
+# reads landed in an ASV whose deepest non-NA rank call was domain, phylum,
+# ..., all the way to species -- "so many reads reached species level, so
+# many only genus, so many left barely identified."
+#
+# Checked directly (not assumed): 0/30477 ASVs at this stage have no
+# taxonomy at all (every one has at least domain+phylum -- unassigned-phylum
+# ASVs were already dropped above) and the join below drops 0 reads (total
+# matches sum(counts_kept) exactly). NA_character_ / "unclassified" is
+# nonetheless handled explicitly and colored grey, not silently dropped --
+# defensive, in case a future run of this pipeline (a different database, a
+# looser lineage filter) ever produces one.
+rank_cols <- c("domain", "phylum", "class", "order", "family", "genus", "species")
+non_na_mat <- !is.na(as.data.frame(taxonomy_kept)[rank_cols])
+# Column index of the last (deepest) non-NA rank per ASV -- multiplying the
+# TRUE/FALSE mask by its own column index and taking max.col() picks the
+# highest surviving index (max.col ignores zeroed-out FALSE positions
+# because index 0 never wins against a real, later index >= 1).
+deepest_idx <- max.col(non_na_mat * col(non_na_mat), ties.method = "last")
+taxonomy_kept$deepest_rank <- ifelse(rowSums(non_na_mat) == 0, "unclassified", rank_cols[deepest_idx])
+rank_levels <- c(rank_cols, "unclassified")
+rank_colors <- stats::setNames(c(viridisLite::viridis(length(rank_cols), direction = -1), "grey60"), rank_levels)
+
+reads_by_rank <- counts_kept |>
+  as.data.frame() |>
+  tibble::rownames_to_column("sample_id") |>
+  tidyr::pivot_longer(-sample_id, names_to = "asv_id", values_to = "count") |>
+  dplyr::filter(count > 0) |>
+  dplyr::left_join(taxonomy_kept |> dplyr::select(asv_id, deepest_rank), by = "asv_id") |>
+  dplyr::mutate(deepest_rank = ifelse(is.na(deepest_rank), "unclassified", deepest_rank)) |> # unmatched join, if ever
+  dplyr::group_by(sample_id, deepest_rank) |>
+  dplyr::summarise(reads = sum(count), .groups = "drop") |>
+  dplyr::left_join(lib_sizes |> dplyr::select(sample_id, sample_id_f, sample_type, library_size), by = "sample_id") |>
+  dplyr::mutate(deepest_rank = factor(deepest_rank, levels = rank_levels), rel = reads / library_size)
+
+stopifnot("reads lost mapping counts_kept -> reads_by_rank" =
+            isTRUE(all.equal(sum(reads_by_rank$reads), sum(counts_kept))))
+
+# Relative composition (0-1, linear), not absolute reads stacked on a log
+# axis: geom_col's stacking always starts each bar's bottom segment at
+# ymin=0, and log(0) is undefined -- scale_y_log10() can't represent that
+# segment's true proportion (it silently renders clipped against the panel
+# floor instead, with no warning, understating/distorting whichever
+# category sits at the base of every single bar). A 0-1 linear axis has no
+# such singularity; the actual read-depth context comes from the paired
+# absolute-count panel below instead (same technique
+# 05_taxonomic_composition.R uses: composition on top, a log-scale
+# read-depth strip underneath, not one axis trying to do both jobs).
+p_rankdepth_composition <- ggplot2::ggplot(reads_by_rank, ggplot2::aes(x = sample_id_f, y = rel, fill = deepest_rank)) +
+  ggplot2::geom_col() +
+  ggplot2::facet_grid(~sample_type, scales = "free_x", space = "free_x") +
+  ggplot2::scale_fill_manual(values = rank_colors, name = "Classified\nto") +
+  ggplot2::scale_y_continuous(labels = scales::label_percent()) +
+  ggplot2::labs(x = NULL, y = "Reads (% of library)", title = "Library composition by taxonomic classification depth") +
+  ggplot2::theme(
+    axis.text.x = ggplot2::element_blank(), axis.ticks.x = ggplot2::element_blank(),
+    axis.text.y = ggplot2::element_text(size = 14),
+    axis.title = ggplot2::element_text(size = 18),
+    plot.title = ggplot2::element_text(size = 22),
+    strip.text = ggplot2::element_text(size = 16, face = "bold"),
+    legend.text = ggplot2::element_text(size = 14),
+    legend.title = ggplot2::element_text(size = 16)
+  )
+
+# p_libsize (absolute reads, correctly log-scaled -- a single color, not
+# stacked, so it has no ymin=0-on-log-scale issue) + the same depth-bracket
+# panel, reused as-is (+theme() here builds a new object, doesn't mutate the
+# p_libsize/p_libsize_full already saved above -- ggplot objects are
+# immutable under `+`). Facet strip text ("control"/"sediment"/"water")
+# blanked on the middle panel -- it already appears once, on top.
+p_libsize_rankdepth_full <- p_rankdepth_composition / (p_libsize + ggplot2::theme(strip.text = ggplot2::element_blank())) / p_depth_brackets +
+  patchwork::plot_layout(heights = c(4, 3, 1))
+save_plot(p_libsize_rankdepth_full, "02_library_sizes_by_rank", w = 13.333, h = 9, dpi = 400)
 
 # Controls (blanks especially) are *expected* to be shallow -- don't flag
 # those on the same footing as a failed biological library. Floor is
