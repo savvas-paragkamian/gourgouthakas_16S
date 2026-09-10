@@ -142,3 +142,58 @@ message(sprintf(
   nrow(counts_relabund), ncol(counts_relabund),
   nrow(counts_clr), ncol(counts_clr)
 ))
+
+# ============================================================================
+# Genus-level equivalents (Part 3c of golden-napping-breeze.md) -- same
+# three transforms, same rarefaction_depth (499, from the upstream
+# workflow), same re-derived CLR prevalence LOGIC (>=10% of samples) but
+# re-applied to the genus matrix's own column count and sparsity, not
+# reusing the ASV-level threshold's absolute number. Genus-level becomes
+# primary for 04/06/07; ASV-level (above) stays supplementary throughout.
+# ============================================================================
+counts_genus <- readRDS(file.path(path_processed, "counts_genus_clean.rds"))
+
+# below_depth is recomputed from counts_genus's OWN row sums, not reused
+# from the ASV-level `below_depth` above -- a sample's genus-level total is
+# lower than its ASV-level total (genus-NA reads excluded, ~4.6% overall,
+# but not uniformly per sample), so the same 499-read depth can exclude a
+# different set of samples here.
+lib_sizes_genus <- rowSums(counts_genus)
+below_depth_genus <- names(lib_sizes_genus)[lib_sizes_genus < rarefaction_depth]
+message(sprintf(
+  "[03_normalize] genus-level: %d/%d samples below the rarefaction depth (%d), excluded from counts_genus_rarefied: %s",
+  length(below_depth_genus), nrow(counts_genus), rarefaction_depth, paste(below_depth_genus, collapse = ", ")
+))
+
+counts_genus_for_rarefaction <- counts_genus[!(rownames(counts_genus) %in% below_depth_genus), , drop = FALSE]
+counts_genus_rarefied <- vegan::rrarefy(counts_genus_for_rarefaction, sample = rarefaction_depth)
+
+counts_genus_relabund <- vegan::decostand(counts_genus, method = "total")
+
+clr_prevalence_min_samples_genus <- ceiling(0.10 * nrow(counts_genus))
+clr_genus_keep <- colSums(counts_genus > 0) >= clr_prevalence_min_samples_genus
+counts_genus_for_clr <- counts_genus[, clr_genus_keep, drop = FALSE]
+message(sprintf(
+  "[03_normalize] genus-level CLR-specific prevalence filter (>=%d/%d samples): %d/%d genera kept for CLR/Aitchison",
+  clr_prevalence_min_samples_genus, nrow(counts_genus), sum(clr_genus_keep), ncol(counts_genus)
+))
+
+counts_genus_zero_replaced <- zCompositions::cmultRepl(counts_genus_for_clr, method = "CZM", output = "p-counts",
+                                                        z.delete = FALSE, suppress.print = TRUE)
+stopifnot(setequal(rownames(counts_genus_zero_replaced), rownames(counts_genus)))
+
+counts_genus_clr <- compositions::clr(counts_genus_zero_replaced)
+counts_genus_clr <- matrix(as.numeric(counts_genus_clr), nrow = nrow(counts_genus_clr), ncol = ncol(counts_genus_clr),
+                            dimnames = dimnames(counts_genus_clr))
+
+saveRDS(counts_genus_rarefied, file.path(path_processed, "counts_genus_rarefied.rds"))
+saveRDS(counts_genus_relabund, file.path(path_processed, "counts_genus_relabund.rds"))
+saveRDS(counts_genus_clr, file.path(path_processed, "counts_genus_clr.rds"))
+saveRDS(below_depth_genus, file.path(path_processed, "rarefaction_excluded_samples_genus.rds"))
+
+message(sprintf(
+  "[03_normalize] genus-level rarefied: %d x %d | relabund: %d x %d | clr: %d x %d",
+  nrow(counts_genus_rarefied), ncol(counts_genus_rarefied),
+  nrow(counts_genus_relabund), ncol(counts_genus_relabund),
+  nrow(counts_genus_clr), ncol(counts_genus_clr)
+))

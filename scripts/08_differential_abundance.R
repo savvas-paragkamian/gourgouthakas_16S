@@ -21,6 +21,17 @@ message(sprintf("[08_differential_abundance] contrast = sample_type (%s), N = %d
 # --- ALDEx2 (primary) -------------------------------------------------------
 # ALDEx2 wants features as ROWS, samples as COLUMNS -- the opposite of this
 # project's canonical orientation (PLAN.md §3), so transpose here only.
+#
+# No library_size covariate here, deliberately, not an oversight: ALDEx2's
+# CLR transform (aldex.clr(), run internally by aldex()) divides each
+# sample's counts by that SAME sample's own geometric mean before taking
+# logs, so a sample's total library size cancels out of the transform by
+# construction -- it's compositionally invariant to library size already.
+# Bolting a library_size covariate onto the t-test framework aldex() uses
+# would need switching to aldex.glm() with a full design matrix, a
+# materially bigger, riskier rewrite of the primary DA method for a
+# confound this method doesn't actually have. (Maaslin2 below isn't CLR-based
+# and does get the covariate, for exactly that reason.)
 reads_for_aldex <- t(counts_eco)
 
 aldex_fit <- ALDEx2::aldex(reads_for_aldex, conditions, mc.samples = 128,
@@ -35,26 +46,44 @@ write_result(aldex_result, "da_aldex2_sample_type")
 # --- Maaslin2 (cross-check) --------------------------------------------
 # Maaslin2 wants samples as rows, features as columns (this project's
 # canonical orientation) -- no transpose needed; it does its own
-# normalization (default TSS + LOG) from raw counts.
+# normalization (default TSS + LOG) from raw counts, which is NOT
+# library-size-invariant the way ALDEx2's CLR is above -- so log_library_size
+# is added as its own fixed effect here, standard practice for this tool,
+# so a sample_type effect can't just be tracking library size instead.
 maaslin_input_data <- as.data.frame(counts_eco)
-maaslin_input_metadata <- as.data.frame(meta_eco[, c("sample_id", "sample_type")])
+maaslin_input_metadata <- as.data.frame(meta_eco[, c("sample_id", "sample_type", "log_library_size")])
 rownames(maaslin_input_metadata) <- maaslin_input_metadata$sample_id
 
 maaslin_fit <- Maaslin2::Maaslin2(
   input_data = maaslin_input_data,
   input_metadata = maaslin_input_metadata,
   output = "results/maaslin2_sample_type",
-  fixed_effects = "sample_type",
+  fixed_effects = c("sample_type", "log_library_size"),
   min_prevalence = 0, # already prevalence-filtered in 02_qc_filter.R
   standardize = FALSE,
   plot_heatmap = FALSE,
   plot_scatter = FALSE
 )
 
-maaslin_result <- tibble::as_tibble(maaslin_fit$results) |>
+maaslin_all_terms <- tibble::as_tibble(maaslin_fit$results)
+write_result(maaslin_all_terms, "da_maaslin2_all_terms") # both fixed effects, unfiltered -- for inspecting the log_library_size term itself
+
+# fixed_effects now has two terms (sample_type, log_library_size), so
+# maaslin_fit$results has a row per (feature, term) pair -- filtered to the
+# sample_type contrast specifically here, or sig_maaslin below would silently
+# mix in ASVs significant for log_library_size instead of/as well as
+# sample_type.
+maaslin_result <- maaslin_all_terms |>
+  dplyr::filter(metadata == "sample_type") |>
   dplyr::rename(asv_id = feature) |>
   dplyr::left_join(taxonomy |> dplyr::select(asv_id, phylum, genus, species), by = "asv_id") |>
   dplyr::arrange(qval)
+
+n_sig_libsize <- sum((maaslin_all_terms |> dplyr::filter(metadata == "log_library_size"))$qval < 0.05, na.rm = TRUE)
+message(sprintf(
+  "[08_differential_abundance] Maaslin2: %d/%d ASVs significantly associated with log_library_size itself (q<0.05) -- see results/da_maaslin2_all_terms.tsv",
+  n_sig_libsize, nrow(maaslin_all_terms |> dplyr::filter(metadata == "log_library_size"))
+))
 
 write_result(maaslin_result, "da_maaslin2_sample_type")
 

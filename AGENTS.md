@@ -75,6 +75,15 @@ applies to sediment only.
 Controls: `ctr_zymo_com`, `ctr_zymo_log`, `ctr_msa_3001` (mocks),
 `ctr_EB` (extraction blank), `ctr_MM` (mastermix blank).
 
+**Read/amplicon length**: full-length 16S rRNA (V1-V9), not a short-read
+amplicon like V4. `HiFi-16S-workflow/nextflow.config` filters DADA2 input to
+`min_len = 1000` / `max_len = 1600` (`main.nf --min_len`/`--max_len`
+defaults). Realized post-filter ASV length distribution (30,477 ASVs,
+`taxonomy_postlineage.rds`): median 1,453 bp, IQR 1,437-1,472 bp, 99% range
+1,389-1,532 bp — centered on the ~1,500 bp expected for a full bacterial 16S
+gene, as expected for PacBio HiFi/Kinnex circular consensus reads (not the
+raw subread length, which is longer per pass but irrelevant post-CCS).
+
 **Column names, and one gap to know about:** `data/metadata.tsv` has `site`
 (the *biological*-replicate-level id — `C1` and `C1_I` are two distinct
 `site` values, not one), `sample_set` (`transect` / `isolate_source` /
@@ -302,6 +311,315 @@ Beyond that:
 Statistical choices made while implementing `PLAN.md` §7, and why. Read
 before changing any of these -- each was picked for a reason specific to
 this dataset, not a generic default.
+
+- **Library size is reported as a covariate (or an above-floor
+  restriction) in every community-level model, not just visualized.**
+  Motivation is a confirmed, not hypothetical, confound: the
+  replicate-concordance check (`02b_controls.R`) found technical-pair
+  Bray-Curtis distance strongly anti-correlated with the pair's minimum
+  library size (Spearman r = -0.86 — shallow libraries look artificially
+  dissimilar), and sediment/water differ systematically in sequencing
+  depth too, so a `sample_type`/`depth_m` effect could in principle be a
+  library-size effect in disguise. `metadata_clean.rds` carries
+  `library_size`/`log_library_size` (log10) as first-class columns,
+  computed once in `02b_controls.R` from the final matrix, name-joined —
+  every script below reads the same numbers rather than re-deriving them.
+  "Above-floor" restriction always means the *same* threshold
+  `03_normalize.R` already uses for rarefaction eligibility (currently 499
+  reads, `data/processed/rarefaction_excluded_samples.rds`), not a second,
+  competing floor. Per-script treatment:
+  - `06_beta_diversity.R` PERMANOVA: two extra models beyond the existing
+    additive/interaction pair — `additive_marginal_libsize` (full N=46,
+    `+ log_library_size` as its own covariate) and
+    `additive_marginal_restricted` (above-floor N=34, no covariate needed —
+    the restriction itself removes the confound). Result: `log_library_size`
+    is itself significant (R²=0.057, p=0.001), but `sample_type`/`depth_m`
+    barely move under adjustment (0.052→0.053, 0.056→0.055) and get
+    *stronger* under restriction (0.067/0.081) — the main effects are
+    robust, not artifacts.
+  - `07_environmental_drivers.R`: a `libsize_adjusted` db-RDA variant
+    (`Condition(log_library_size)`, vegan's standard covariate-partialling
+    mechanism for constrained ordination — R²=0.131 vs. primary's 0.141,
+    barely moved) and a library-size partial Mantel (`community ~ depth |
+    log_library_size`: r=0.280 vs. unpartialled r=0.272, if anything
+    slightly stronger).
+  - `08_differential_abundance.R`: Maaslin2 gets `log_library_size` added
+    to `fixed_effects` (natively supported, standard practice for this
+    tool) — `results/da_maaslin2_all_terms.tsv` has both terms' full
+    results, `da_maaslin2_sample_type.tsv` stays filtered to the
+    `sample_type` contrast only (mixing the two terms' significant hits
+    together would have been a real bug, caught before it shipped). ALDEx2
+    does **not** get the covariate: its CLR transform divides each
+    sample's counts by that same sample's own geometric mean before
+    logging, so it's compositionally invariant to total library size by
+    construction — adding one would mean switching the primary DA method
+    to `aldex.glm()` with a full design matrix, a materially bigger
+    rewrite for a confound this method doesn't actually have.
+  - `04_alpha_diversity.R`: no change. Alpha diversity runs on rarefied
+    counts (every included sample equalized to exactly 499 reads), so
+    library size has zero variance in that set by construction and can't
+    be a covariate there — rarefaction *is* the library-size control for
+    this metric, not a gap.
+
+- **Mock cross-talk index (`02b_controls.R` T6,
+  `results/02b_crosstalk_index.tsv` + `02b_crosstalk_index.png`, plus
+  `02b_mock_recovery_species.tsv`/`02b_mock_crosstalk.tsv`) — the measured
+  index-hopping/barcode-cross-talk rate, and what it does and doesn't
+  license claiming about species-level resolution.** Built from the three
+  mocks (`data/mock_expected.tsv` gives near-mutually-exclusive membership
+  across them, confirmed: 6 genera exclusive to `mock_env`, 3 exclusive to
+  `mock_even`+`mock_log`), not asserted from general PacBio literature.
+  - **Mock-to-mock cross-talk (the direct index-hopping estimate)**: reads
+    in one mock's well assigned to a genus expected only in a *different*
+    mock. Measured **0.09-0.21%** of a mock's reads (mock_even 0.09%,
+    mock_log 0.13%, mock_env 0.21%) — this is the concrete number behind
+    "PacBio barcode cross-talk is normally low": here it *is* low, and now
+    it's a citable rate rather than an assumed one. The Listeria-in-mock_env
+    false positive visible in `02b_mock_recovery.png` is exactly this
+    signal; T6 is its formalization across all three mocks, not a new
+    finding.
+  - **Species-level recovery is 19% (5/26 expected genus×mock pairs
+    resolved to the correct species), vs. 92% at genus level (T2).** This
+    is the number that actually bears on the "full-length reads give
+    species-level resolution" claim — genus-level recovery is strong,
+    species-level recovery with this classifier (`gg2_nb`, naive Bayes
+    against GTDB-backed Greengenes2) is not, on this dataset. Of the 26
+    expected pairs, 21 are "not detected" (the ASV classifies confidently to
+    genus but `gg2_nb` doesn't commit to a species) and the *other* mock
+    ASVs contribute 54 "false positive" species rows — nearly all
+    same-genus/different-species misclassification (e.g. `Escherichia_coli`
+    reads landing on `Escherichia_albertii`/`boydii`/`sonnei`,
+    `Listeria_monocytogenes` on `Listeria_A_marthii`), **not** cross-mock
+    contamination — that signal is already isolated separately in the
+    mock-to-mock cross-talk number above. **Practical implication: claim
+    species-level taxonomic *reads* (full-length 16S genuinely resolves
+    more than V4 short reads) but not species-level *classifier accuracy*
+    with this NB/GTDB pipeline on this dataset** — any species-level claim
+    in the writeup should cite the 19% figure, not assume full-length =
+    accurate species calls.
+  - **Chimera rate**: mocks 2.5-6.1% (mock_even 2.53%, mock_env 5.74%,
+    mock_log 6.07%) vs. real samples 2.55% and extraction/mastermix blanks
+    3.20% — mocks are in line with the rest of the run, not unusually
+    clean or dirty; chimera removal isn't hiding anything mock-specific.
+  - **ASV excess rate** (T3's excess-ASV count as a % of ASVs observed):
+    mock_env 5.7%, mock_even 34.4%, **mock_log 93.1%** (578 ASVs observed
+    vs. ~16-40 expected). This is the number that directly motivates the
+    genus-level-primary decision below — it is *not* cross-talk (mock-to-
+    mock cross-talk for mock_log is only 0.13%): it's singletons and rRNA-
+    operon copy-number variants of the correctly-identified genera, exactly
+    as expected for a 16S-only ASV table with no copy-number correction at
+    the ASV level.
+  - **`read_method_tax()` bug fixed while building this**: its genus/species
+    extraction regex (`sub("^.*g__(...)...")`) silently fell through to the
+    *raw, full taxon string* — not `NA` — whenever a rank prefix was absent
+    entirely (common: `silva_vsearch`'s Taxon field has no `g__`/`s__`
+    prefixes at all; `gg2_nb` genus-classifies but doesn't always
+    species-classify an ASV). This corrupted the species-level recovery
+    table (raw taxon strings appearing as "species") and, downstream,
+    crashed `score_mock_method()` for `silva_vsearch` (`stats::aggregate()`
+    returns a `count` column typed `list()`, not `numeric`, when its
+    grouping vector is *entirely* `NA` — `sum()` then errors on that list).
+    Fixed at the source (`stringr::str_extract()`, which returns `NA` on no
+    match, instead of base `sub()`'s silent no-op) plus an explicit
+    NA-drop-before-aggregate guard everywhere `methods$*$genus`/`$species`
+    feeds `stats::aggregate()`.
+
+- **Depth-honest replicate concordance (`02b_controls.R`,
+  `02_replicate_concordance.png` + `results/02_replicate_vs_null_band.tsv`,
+  `02_replicate_null_band_summary.tsv`, `02_replicate_floor_by_level.tsv`)
+  — an empirical, measured read-count floor, not the ad hoc 500/499 already
+  in use. STOP-AND-ASK finding: read before touching either existing
+  threshold.** Two changes to the original (now superseded)
+  `02_replicate_concordance.png`:
+  1. **Pairwise-rarefied Bray-Curtis** (`bray_rarefied`, added alongside the
+     existing full-depth `bray` in `results/replicate_concordance_*.tsv`):
+     both samples in a pair are repeatedly (30x) subsampled down to their
+     own shared `min(lib_a, lib_b)` via `vegan::rrarefy()` before computing
+     Bray-Curtis, and the result averaged — so a 24-read vs. 400,000-read
+     "pair" is compared on equal footing at the depth it can actually
+     achieve, not penalized for the shallow side's sampling noise alone.
+  2. **Subsampling null band**: the single deepest real sediment sample and
+     deepest real water sample are each repeatedly (50x per depth,
+     log-spaced from 20 to 400,000 reads) split into two INDEPENDENT
+     `rrarefy()` subsamples, and Bray-Curtis computed between them — a null
+     distribution of "how dissimilar do two subsamples of ONE identical
+     community look, from pure sampling noise alone, at depth N." Plotted
+     as a median+10th-90th-percentile ribbon under the real within-/
+     between-pair points, now positioned on that same depth axis by each
+     pair's own `min_lib` (the categorical technical/biological x-axis is
+     gone).
+  - **Result — genuinely different stories for technical vs. biological
+    pairs, not one number**:
+    - **Technical pairs (`02_replicate_floor_by_level.tsv`: 4/23
+      indistinguishable from noise, all shallow) split cleanly by depth.**
+      Below ~8,000-8,300 reads, a technical pair's Bray-Curtis distance
+      cannot be told apart from what two subsamples of the *same* community
+      would produce by chance alone — "this pair looks discordant" and
+      "this pair is just shallow" are not distinguishable claims down here.
+      Above that depth, pairs separate from the (rapidly shrinking) null
+      band, but their own absolute `bray_rarefied` keeps *falling* as depth
+      increases (e.g. one technical pair: 0.44 at 8,122 reads → 0.10 at
+      467,624 reads) — the "reproduce above it" half of the story: real
+      reproducibility, visible once sampling noise is no longer big enough
+      to hide it, not a failure mode that shallow sampling was masking.
+    - **Biological pairs (0/18 indistinguishable from noise, at ANY depth
+      tested, including the shallowest — 24 reads) are a different story
+      entirely, not a depth-threshold one.** Their `bray_rarefied` (0.7-1.0)
+      already clearly exceeds the null band at the very shallowest depths
+      in the dataset, where the band is at its widest and most forgiving —
+      there's no depth at which more sequencing would have changed this
+      verdict. This is *expected*, not a data-quality problem: a
+      "biological pair" here is same `location`+`tech_rep` but a different
+      arm (transect vs. isolate_source) — deliberately different physical
+      samples, not a duplicate extraction of the same one. Real, immediate
+      spatial heterogeneity between arms, not evidence replication failed
+      or a case the read floor below is relevant to.
+  - **Combined empirical floor (`results/02_replicate_floor_by_level.tsv`
+    has the technical/biological split) — SUPERSEDED, see below.** Originally
+    measured at ~8,000-8,300 reads, computed on `counts_filtered` (the
+    post-prevalence-filter matrix). Once Part 3a (below) moved this whole
+    computation earlier — onto `counts_noctrl`, pre-prevalence-filter, so
+    its own result could gate that filter without circularity — the same
+    method measured **in the tens of reads (observed 24-78 across repeated
+    runs, Monte Carlo noise in which 1-2 borderline pairs happen to fall
+    inside the shrinking null band — not a precise fixed number), not
+    ~8,272.** This drop wasn't noise in the "ignore it" sense, though: the
+    original ~8,272 figure was itself an artifact of running on an
+    already-prevalence-filtered matrix (the exact ordering problem Part 3a
+    exists to fix) — on the full, unfiltered ASV set, the deepest
+    previously-"indistinguishable" technical pair (`C9`, 8,272 reads) turned
+    out to show real discordance once every ASV was counted, not just the
+    ones that happened to survive prevalence filtering (`bray_rarefied`
+    rose from 0.183 to 0.28-0.29 at nearly the same depth across repeated
+    runs, while the null band's ceiling at that depth barely moved). **Per
+    direct instruction, the prevalence filter's eligibility floor (below) is
+    set manually to 8,000 reads rather than tracking this recomputed,
+    unstable few-dozen-reads figure** — that figure is the more
+    methodologically honest self-vs-self noise floor, but (a) a filter gated
+    there excludes almost no libraries (2/36 sediment, 0/10 water) and (b)
+    its own run-to-run instability is a second, independent reason not to
+    build a hard filter threshold on it directly. Both numbers are real and
+    both are reported (`empirical_read_floor` = the noisy few-dozen-reads
+    figure, exact value varies by run, in the code and
+    `results/02_replicate_floor_by_level.tsv`; `prevalence_eligibility_floor`
+    = 8,000, the manual value actually used to gate the prevalence filter)
+    — they measure genuinely different things (self-vs-self noise floor vs.
+    a chosen conservative cutoff) and shouldn't be conflated.
+  - Null-band mechanics sanity-checked with `stopifnot()`: the sediment
+    reference's null median must fall as depth increases and exceed 0.05 at
+    the shallow end — both hold.
+
+- **Prevalence filter reworked (`02b_controls.R`, Part 3a of
+  `golden-napping-breeze.md`) — within-type, read-count-aware, floor-gated,
+  replacing a pooled `prevalence >= 2 of 46 samples, >0 reads` rule with
+  three independent, real problems.** Direct objection, not a style
+  preference: the old rule let a taxon pass on e.g. "1 sediment read + 1
+  water read" (sediment and water share almost no taxa — a pooled count is
+  not ecologically meaningful), treated a single read as "present" (Part 1
+  measured mock-to-mock cross-talk directly in this dataset at 0.09-0.21% of
+  reads — a lone read is indistinguishable from that), and let libraries
+  with 24-200 reads vote on prevalence before any read floor had been
+  established. New rule: an ASV is kept if it has ≥2 reads in ≥2 samples of
+  the SAME type, counting only samples at/above the 8,000-read eligibility
+  floor (`prevalence_eligibility_floor` — manual, see the empirical-floor
+  note above for why this isn't the noisy, recomputed few-dozen-reads
+  figure). Result: **14,453/30,430
+  ASVs kept, down from 15,455/30,430 under the old rule** — a real,
+  reported reduction, not a rounding difference. Eligible-sample counts per
+  type are asymmetric by design/data: sediment 17/36, water only 2/10 (an
+  honest reflection of water's much shallower sequencing in this dataset,
+  not softened for that reason — see the eligibility-floor decision above).
+  The entire replicate-concordance diagnostic block (pairwise-rarefied
+  Bray-Curtis, subsampling null band) was relocated earlier in the script to
+  run on `counts_noctrl` instead of `counts_filtered`, specifically so its
+  own `empirical_read_floor` output could feed this filter without
+  circularity (compute the floor on a matrix, then use that floor to build
+  the SAME matrix, would have been backwards).
+
+- **Intragenomic-variant test (`02b_controls.R`, Part 3b of
+  `golden-napping-breeze.md`, `results/02b_intragenomic_variant_test.tsv` +
+  `_summary.tsv` + `plots/02b_intragenomic_variant_test.png`) — the direct
+  evidence for genus-level aggregation (Part 3c), not an assumption.**
+  Question: do ASVs sharing an identical species-level GTDB label
+  (`species_norm`) co-occur across samples with correlated abundance (the
+  signature of intragenomic rRNA-operon copies of ONE genome, present in a
+  fixed ratio) more than random cross-species-label ASV pairs do? Run on the
+  Part-3a-corrected `counts_filtered`/`taxonomy_filtered` (not the earlier
+  reconnaissance numbers, which were computed on the uncorrected table and
+  are superseded). **Result: yes, clearly.** Same-species-label pairs
+  (44,063 pairs, 1,144 groups sharing a label, capped at 20 ASVs/group):
+  median Jaccard co-occurrence 0.40 vs. a cross-species null's 0.00; median
+  Spearman abundance correlation 0.60 vs. the null's -0.05. Both Wilcoxon
+  p≈0, rank-biserial effect ≈0.40-0.41 (positive = same-species pairs
+  stochastically exceed the null, the direction the hypothesis predicts).
+  **Not a clean unimodal signal, though** — the figure shows both
+  distributions are bimodal, and same-species-label pairs still have real
+  mass down near 0 on both metrics: a meaningful fraction of same-label ASV
+  pairs behave like independent organisms (a coarse nearest-reference label
+  shared by genuinely distinct taxa), not like intragenomic copies of one
+  genome. Case study `GMQP-bins7_sp004366385` (the label pointed at
+  directly): 180 ASVs pre-Part-3a collapsed to 20 post-3a (capped for the
+  pairwise computation) — a concrete illustration of how much the
+  uncorrected prevalence filter had been letting through. **Conclusion for
+  Part 3c: the evidence supports genus-level aggregation as reducing real
+  ASV-level redundancy, not manufacturing an assumption — but "mostly
+  intragenomic variants" would overstate it; "a substantial, statistically
+  clear excess of same-species co-occurrence over what distinct organisms
+  sharing a label would produce, alongside a real population of
+  genuinely-distinct co-labeled organisms" is the accurate summary.**
+
+- **Genus-level is the primary unit for core community structure
+  (`02b_controls.R`/`03_normalize.R`/`04_alpha_diversity.R`/
+  `06_beta_diversity.R`/`07_environmental_drivers.R`, Part 3c of
+  `golden-napping-breeze.md`) — ASV-level kept as supplementary, not
+  dropped.** Built from the Part-3a-corrected ASV table
+  (`counts_filtered`/`taxonomy_filtered`, not the earlier uncorrected one)
+  and justified by Part 3b's measured evidence, not assumed.
+  - **`02b_controls.R`**: `counts_genus_clean.rds`/`taxonomy_genus_clean.rds`
+    — ASVs summed by `genus_norm`; genus-NA ASVs excluded (821/14,453 ASVs,
+    4.587% of reads — reported, not silently dropped). **46 samples x 1,406
+    genera, ASV:genus ratio 10.3:1.**
+  - **`03_normalize.R`**: genus-level rarefied/relabund/CLR
+    (`counts_genus_rarefied.rds`/`_relabund.rds`/`_clr.rds`), same 499-read
+    depth and same re-derived (>=10% of samples) CLR-prevalence logic as
+    ASV-level, but re-applied to the genus matrix's own column count and
+    sparsity, not reusing the ASV-level threshold's absolute number.
+    `rarefaction_excluded_samples_genus.rds` is its OWN list, recomputed
+    from the genus matrix's own row sums, not reused from the ASV-level
+    exclusion list — genus-level totals are lower (genus-NA reads excluded),
+    so the same depth excludes a different set (13/46 samples, vs. 12-13/46
+    at ASV-level depending on the exact run — one additional sample,
+    `C3_2_A`, dips below the floor only once genus-NA reads are removed).
+  - **`04_alpha_diversity.R`/`06_beta_diversity.R`**: refactored into one
+    function each (`run_alpha_diversity()`/`run_beta_diversity_level()`),
+    called twice — genus-level first, writing the PRIMARY, unsuffixed
+    result files (`alpha_diversity.tsv`, `06_permanova.tsv`,
+    `dist_bray.rds`, etc. — the same names these scripts have always used);
+    ASV-level second, writing `*_asv`-suffixed supplementary files. This
+    means every downstream consumer of those unsuffixed names (`10_figures.R`,
+    `09_spatial_analysis.R`, `07_environmental_drivers.R`) automatically
+    started reading genus-level data with **zero code changes in those
+    three scripts** — confirmed by re-running each standalone.
+  - **`07_environmental_drivers.R`, `09_spatial_analysis.R`,
+    `10_figures.R`: genuinely unchanged**, per the point above.
+  - **`08_differential_abundance.R`, `11_faprotax.R`, `05_taxonomic_composition.R`:
+    unchanged, deliberately** — 08 stays ASV-level (scope decision,
+    `golden-napping-breeze.md` Context section: doubling ALDEx2's ~4-5 min
+    runtime for a second full model wasn't judged worth it against the
+    payoff); 05 and 11 already operate at genus level in practice.
+  - **06's dissimilarity heatmap (`06_dissimilarity_heatmap.png`) uses the
+    genus-level (primary) Bray distance only** — not duplicated at ASV
+    level, judged modest incremental value for a fairly heavy
+    pheatmap+PNG-composition diagnostic. Its library-size color annotation
+    stays ASV-level raw read counts (`counts_clean.rds`) regardless — that's
+    the actual sequencing depth per sample, not something that changes
+    meaning at genus level.
+  - **Result direction, for context** (not the headline — Part 3b's
+    evidence is): genus-level R² is consistently a bit higher than the
+    ASV-level supplementary result across every model checked (PERMANOVA
+    Bray additive: sample_type 0.076 vs. 0.057, depth_m 0.074 vs. 0.056;
+    db-RDA primary: 0.183 vs. 0.145) — consistent with genus collapse
+    reducing ASV-level noise rather than just discarding signal.
 
 - **Rarefaction depth (499) comes from the upstream pipeline's own
   `results/hifi/final/rarefaction_depth_suggested.txt`**, not a re-derived
